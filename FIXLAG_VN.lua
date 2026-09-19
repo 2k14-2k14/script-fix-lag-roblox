@@ -1,12 +1,13 @@
 -- =====================================================
--- FIXLAG_VN
--- Menu scroll + FPS lock preset 45/60/90 + 20 module tối ưu
+-- FIXLAG_VN PRO v1
+-- Thêm: Xóa lửa nhiều màu, debris cleaner, texture killer
 -- =====================================================
 local Lighting    = game:GetService("Lighting")
 local Workspace   = game:GetService("Workspace")
 local Players     = game:GetService("Players")
 local RunService  = game:GetService("RunService")
 local Stats       = game:GetService("Stats")
+local Debris      = game:GetService("Debris")
 local LocalPlayer = Players.LocalPlayer
 
 for _, v in ipairs(game.CoreGui:GetChildren()) do
@@ -22,7 +23,8 @@ local state = {
     atmosphere=false, physics=false, stripChar=false, skybox=false,
     terrain=false, animation=false, killLights=false, bwMode=false,
     nametags=false, charSounds=false, forceShadow=false,
-    removeEffects=false,
+    removeEffects=false, killFire=false, debrisClean=false,
+    textureKill=false, soundKill=false, meshKill=false,
     autoClean=false, cullDist=200, fpsTarget=60,
 }
 
@@ -30,7 +32,25 @@ local saved = {
     decals={}, sounds={}, parts={}, lighting={}, accs={}, humans={},
     guis={}, atmo={}, physics={}, sky={}, lights={}, strippedChar={},
     quality=nil, nametags={}, charSounds={}, shadows={}, allEffects={},
+    fires={}, debris={}, textures={}, soundGroups={}, meshes={},
 }
+
+-- Hàm nhận diện màu "nóng" (lửa: đỏ/cam/vàng)
+local function isFireColor(c)
+    if not c then return false end
+    local r, g, b = c.R, c.G, c.B
+    return (r > 0.55 and g < 0.6 and b < 0.4)
+        or (r > 0.7 and g > 0.25 and g < 0.85 and b < 0.35)
+end
+
+-- Nhận diện texture lửa
+local function isFireTexture(t)
+    if not t then return false end
+    t = t:lower()
+    return t:find("fire") or t:find("flame") or t:find("ember")
+        or t:find("spark") or t:find("burn") or t:find("explosion")
+        or t:find("rbxassetid://%-?%d+") and false
+end
 
 -- =====================================================
 -- FPS + PING
@@ -162,6 +182,163 @@ local function toggleEffects(on)
             end)
         end
         saved.sounds = {}
+    end
+end
+
+-- =====================================================
+-- 🔥 3B. ANTI-FIRE PRO — Xóa mọi hiệu ứng lửa nhiều màu
+-- =====================================================
+local function toggleAntiFire(on)
+    if on then
+        for _, v in ipairs(Workspace:GetDescendants()) do
+            pcall(function()
+                -- 1. Fire instance
+                if v:IsA("Fire") then
+                    table.insert(saved.fires, {obj = v, key = "Enabled", old = v.Enabled})
+                    v.Enabled = false
+                    v.Size = 0
+                    v.Heat = 0
+                end
+                -- 2. ParticleEmitter lửa (texture hoặc màu nóng)
+                if v:IsA("ParticleEmitter") then
+                    local tex = v.Texture or ""
+                    local c1 = v.Color and v.Color.Keypoints and v.Color.Keypoints[1] and v.Color.Keypoints[1].Value
+                    if isFireTexture(tex) or isFireColor(c1) then
+                        table.insert(saved.fires, {obj = v, key = "Enabled", old = v.Enabled})
+                        v.Enabled = false
+                        v.Rate = 0
+                    end
+                end
+                -- 3. PointLight / SpotLight màu nóng
+                if v:IsA("PointLight") or v:IsA("SpotLight") then
+                    if isFireColor(v.Color) then
+                        table.insert(saved.fires, {obj = v, key = "Enabled", old = v.Enabled})
+                        v.Enabled = false
+                        v.Brightness = 0
+                    end
+                end
+                -- 4. Smoke
+                if v:IsA("Smoke") then
+                    table.insert(saved.fires, {obj = v, key = "Enabled", old = v.Enabled})
+                    v.Enabled = false
+                    v.Opacity = 0
+                end
+                -- 5. Explosion mới
+                if v:IsA("Explosion") then
+                    pcall(function() v:Destroy() end)
+                end
+            end)
+        end
+    else
+        for _, f in ipairs(saved.fires) do
+            pcall(function()
+                if f.obj and f.obj.Parent then
+                    f.obj[f.key] = f.old
+                end
+            end)
+        end
+        saved.fires = {}
+    end
+end
+
+-- 3C. DEBRIS CLEANER — Tự hủy effect mới spawn
+local function toggleDebrisClean(on)
+    if on then
+        state._debrisConn = Workspace.DescendantAdded:Connect(function(v)
+            pcall(function()
+                if v:IsA("Explosion") then v:Destroy() end
+                if v:IsA("Fire") then v.Enabled = false; v.Size = 0 end
+                if v:IsA("Smoke") then v.Enabled = false end
+                if v:IsA("ForceField") then v.Visible = false end
+                if v:IsA("ParticleEmitter") then
+                    local c1 = v.Color and v.Color.Keypoints and v.Color.Keypoints[1] and v.Color.Keypoints[1].Value
+                    if isFireColor(c1) or isFireTexture(v.Texture) then
+                        v.Enabled = false; v.Rate = 0
+                    end
+                end
+            end)
+        end)
+    else
+        if state._debrisConn then
+            state._debrisConn:Disconnect()
+            state._debrisConn = nil
+        end
+    end
+end
+
+-- 3D. TEXTURE KILL
+local function toggleTextureKill(on)
+    if on then
+        for _, v in ipairs(Workspace:GetDescendants()) do
+            pcall(function()
+                if v:IsA("Texture") or v:IsA("SurfaceAppearance") then
+                    table.insert(saved.textures, {obj = v, key = v:IsA("Texture") and "Transparency" or "AlphaMode", old = v:IsA("Texture") and v.Transparency or v.AlphaMode})
+                    if v:IsA("Texture") then v.Transparency = 1 else v.AlphaMode = Enum.AlphaMode.Overlay end
+                end
+            end)
+        end
+    else
+        for _, t in ipairs(saved.textures) do
+            pcall(function()
+                if t.obj and t.obj.Parent then t.obj[t.key] = t.old end
+            end)
+        end
+        saved.textures = {}
+    end
+end
+
+-- 3E. MESH KILL
+local function toggleMeshKill(on)
+    if on then
+        for _, v in ipairs(Workspace:GetDescendants()) do
+            pcall(function()
+                if v:IsA("SpecialMesh") or v:IsA("MeshPart") and v.TextureID ~= "" then
+                    if v:IsA("SpecialMesh") then
+                        table.insert(saved.meshes, {obj = v, key = "TextureId", old = v.TextureId})
+                        v.TextureId = ""
+                    else
+                        table.insert(saved.meshes, {obj = v, key = "TextureID", old = v.TextureID})
+                        v.TextureID = ""
+                    end
+                end
+            end)
+        end
+    else
+        for _, m in ipairs(saved.meshes) do
+            pcall(function()
+                if m.obj and m.obj.Parent then m.obj[m.key] = m.old end
+            end)
+        end
+        saved.meshes = {}
+    end
+end
+
+-- 3F. SOUND KILL PRO
+local function toggleSoundKill(on)
+    if on then
+        for _, v in ipairs(Workspace:GetDescendants()) do
+            pcall(function()
+                if v:IsA("Sound") and v.IsPlaying then
+                    table.insert(saved.soundGroups, {obj = v, vol = v.Volume})
+                    v.Volume = 0
+                end
+            end)
+        end
+        for _, v in ipairs(Lighting:GetDescendants()) do
+            pcall(function()
+                if v:IsA("Sound") and v.IsPlaying then
+                    table.insert(saved.soundGroups, {obj = v, vol = v.Volume})
+                    v.Volume = 0
+                end
+            end)
+        end
+    else
+        for _, s in ipairs(saved.soundGroups) do
+            pcall(function()
+                if s.obj and s.obj.Parent then s.obj.Volume = s.vol end
+            end)
+        end
+        saved.soundGroups = {}
     end
 end
 
@@ -327,9 +504,11 @@ local function togglePhysics(on)
                     if on then
                         table.insert(saved.physics, {
                             obj = v, touch = v.CanTouch, query = v.CanQuery,
+                            anchored = v.Anchored,
                         })
                         v.CanTouch = false
                         v.CanQuery = false
+                        v.Anchored = true
                     end
                 end
             end
@@ -341,6 +520,7 @@ local function togglePhysics(on)
                 if p.obj and p.obj.Parent then
                     p.obj.CanTouch = p.touch
                     p.obj.CanQuery = p.query
+                    p.obj.Anchored = p.anchored
                 end
             end)
         end
@@ -552,7 +732,7 @@ local function toggleForceShadow(on)
     end
 end
 
--- 20. XÓA MỌI HIỆU ỨNG
+-- 20. XÓA MỌI HIỆU ỨNG (bao gồm lửa)
 local function toggleRemoveEffects(on)
     if on then
         for _, v in ipairs(Lighting:GetDescendants()) do
@@ -601,6 +781,8 @@ local function toggleRemoveEffects(on)
                 end)
             end
         end
+        -- Gọi luôn AntiFire để diệt lửa nhiều màu
+        pcall(toggleAntiFire, true)
     else
         for _, e in ipairs(saved.allEffects) do
             pcall(function()
@@ -612,6 +794,7 @@ local function toggleRemoveEffects(on)
             end)
         end
         saved.allEffects = {}
+        pcall(toggleAntiFire, false)
     end
 end
 
@@ -623,6 +806,7 @@ local safeKeys = {
     "accessories", "npcFreeze", "gui3d", "atmosphere",
     "physics", "skybox", "terrain", "animation", "killLights",
     "nametags", "charSounds", "forceShadow", "removeEffects",
+    "killFire", "debrisClean", "textureKill", "soundKill", "meshKill",
 }
 
 local function applyAll(on)
@@ -633,7 +817,9 @@ local function applyAll(on)
     pcall(togglePhysics, on); pcall(toggleSkybox, on); pcall(toggleTerrain, on)
     pcall(toggleAnimation, on); pcall(toggleKillLights, on)
     pcall(toggleNametags, on); pcall(toggleCharSounds, on); pcall(toggleForceShadow, on)
-    pcall(toggleRemoveEffects, on)
+    pcall(toggleRemoveEffects, on); pcall(toggleAntiFire, on)
+    pcall(toggleDebrisClean, on); pcall(toggleTextureKill, on)
+    pcall(toggleSoundKill, on); pcall(toggleMeshKill, on)
 end
 
 local function offAll()
@@ -651,7 +837,6 @@ gui.ResetOnSpawn = false
 gui.IgnoreGuiInset = true
 gui.Parent = game.CoreGui
 
--- FPS FLOATING
 local fpsFrame = Instance.new("Frame")
 fpsFrame.Size = UDim2.new(0, 220, 0, 70)
 fpsFrame.Position = UDim2.new(0, 15, 0, 15)
@@ -692,7 +877,6 @@ spawn(function()
     end
 end)
 
--- MENU
 local menu = Instance.new("Frame")
 menu.Size = UDim2.new(0, 300, 0, 540)
 menu.Position = UDim2.new(0, 15, 0, 95)
@@ -710,7 +894,7 @@ local title = Instance.new("TextLabel")
 title.Size = UDim2.new(1, -40, 0, 34)
 title.Position = UDim2.new(0, 10, 0, 3)
 title.BackgroundTransparency = 1
-title.Text = "🔧 FIXLAG_VN"
+title.Text = "🔧 FIXLAG_VN PRO"
 title.Font = Enum.Font.GothamBold
 title.TextSize = 14
 title.TextColor3 = Color3.fromRGB(100, 255, 130)
@@ -747,7 +931,6 @@ minBtn.MouseButton1Click:Connect(function()
     minBtn.Text = collapsed and "+" or "–"
 end)
 
--- ===== NÚT TOGGLE =====
 local buttons = {}
 local function makeToggle(label, yPos, key, fn)
     local btn = Instance.new("TextButton")
@@ -777,28 +960,32 @@ local function add(label, key, fn)
     y = y + 31
 end
 
-add("Tắt đèn & hậu kỳ",       "lighting",    toggleLighting)
-add("Xóa Decal (an toàn)",    "decals",      toggleDecals)
-add("Tắt hạt & âm thanh",     "effects",     toggleEffects)
-add("Ẩn vật thể xa",          "hideFar",     toggleHideFar)
-add("Chất lượng thấp nhất",   "lowQuality",  toggleLowQuality)
-add("Xóa phụ kiện người khác","accessories", toggleAccessories)
-add("Đóng băng NPC xa",       "npcFreeze",   toggleNpcFreeze)
-add("Tắt GUI 3D xa",          "gui3d",       toggleGui3d)
-add("Tắt Atmosphere/Clouds",  "atmosphere",  toggleAtmosphere)
-add("Giảm Physics xa",        "physics",     togglePhysics)
-add("⚫ Strip nhân vật",      "stripChar",   toggleStripChar)
-add("⚫ Xóa Skybox (xám)",    "skybox",      toggleSkybox)
-add("⚫ Xóa Terrain (cỏ)",    "terrain",     toggleTerrain)
-add("⚫ Tắt Animation xa",    "animation",   toggleAnimation)
-add("⚫ Kill mọi Light",      "killLights",  toggleKillLights)
-add("⚫ Chế độ TRẮNG ĐEN",    "bwMode",      toggleBW)
-add("✦ Tắt Nametag",          "nametags",    toggleNametags)
-add("✦ Tắt âm thanh nhân vật","charSounds",  toggleCharSounds)
-add("✦ Tắt Shadow toàn bộ",   "forceShadow", toggleForceShadow)
-add("🔥 XÓA MỌI HIỆU ỨNG",    "removeEffects", toggleRemoveEffects)
+add("Tắt đèn & hậu kỳ",        "lighting",      toggleLighting)
+add("Xóa Decal (an toàn)",     "decals",        toggleDecals)
+add("Tắt hạt & âm thanh",      "effects",       toggleEffects)
+add("🔥 DIỆT LỬA NHIỀU MÀU",   "killFire",      toggleAntiFire)
+add("🧹 Dọn rác effect mới",   "debrisClean",   toggleDebrisClean)
+add("🖼 Xóa Texture/Mesh",     "textureKill",   toggleTextureKill)
+add("🔇 Sound Killer Pro",     "soundKill",     toggleSoundKill)
+add("📦 Xóa Mesh Texture",     "meshKill",      toggleMeshKill)
+add("Ẩn vật thể xa",           "hideFar",       toggleHideFar)
+add("Chất lượng thấp nhất",    "lowQuality",    toggleLowQuality)
+add("Xóa phụ kiện người khác", "accessories",   toggleAccessories)
+add("Đóng băng NPC xa",        "npcFreeze",     toggleNpcFreeze)
+add("Tắt GUI 3D xa",           "gui3d",         toggleGui3d)
+add("Tắt Atmosphere/Clouds",   "atmosphere",    toggleAtmosphere)
+add("Giảm Physics xa",         "physics",       togglePhysics)
+add("⚫ Strip nhân vật",       "stripChar",     toggleStripChar)
+add("⚫ Xóa Skybox (xám)",     "skybox",        toggleSkybox)
+add("⚫ Xóa Terrain (cỏ)",     "terrain",       toggleTerrain)
+add("⚫ Tắt Animation xa",     "animation",     toggleAnimation)
+add("⚫ Kill mọi Light",       "killLights",    toggleKillLights)
+add("⚫ Chế độ TRẮNG ĐEN",     "bwMode",        toggleBW)
+add("✦ Tắt Nametag",           "nametags",      toggleNametags)
+add("✦ Tắt âm thanh nhân vật", "charSounds",    toggleCharSounds)
+add("✦ Tắt Shadow toàn bộ",    "forceShadow",   toggleForceShadow)
+add("🔥 XÓA MỌI HIỆU ỨNG",     "removeEffects", toggleRemoveEffects)
 
--- ===== KHÓA FPS PRESET 45/60/90 =====
 local fpsLabel = Instance.new("TextLabel")
 fpsLabel.Size = UDim2.new(1, -20, 0, 20)
 fpsLabel.Position = UDim2.new(0, 10, 0, y + 5)
@@ -911,7 +1098,6 @@ noteLabel.Parent = scroll
 
 y = y + 210
 
--- ===== CULL DISTANCE SLIDER =====
 local distLabel = Instance.new("TextLabel")
 distLabel.Size = UDim2.new(1, -20, 0, 20)
 distLabel.Position = UDim2.new(0, 10, 0, y + 5)
@@ -948,7 +1134,6 @@ Instance.new("UICorner", sliderBtn).CornerRadius = UDim.new(1, 0)
 
 y = y + 42
 
--- ===== AUTO CLEAN =====
 local autoBtn = Instance.new("TextButton")
 autoBtn.Size = UDim2.new(1, -20, 0, 30)
 autoBtn.Position = UDim2.new(0, 10, 0, y)
@@ -969,7 +1154,6 @@ end)
 
 y = y + 35
 
--- ===== NÚT BẬT TẤT CẢ =====
 local allBtn = Instance.new("TextButton")
 allBtn.Size = UDim2.new(1, -20, 0, 42)
 allBtn.Position = UDim2.new(0, 10, 0, y)
@@ -997,7 +1181,6 @@ end)
 
 y = y + 47
 
--- ===== NÚT TẮT TẤT CẢ =====
 local offAllBtn = Instance.new("TextButton")
 offAllBtn.Size = UDim2.new(1, -20, 0, 42)
 offAllBtn.Position = UDim2.new(0, 10, 0, y)
@@ -1023,7 +1206,6 @@ end)
 
 y = y + 47
 
--- ===== KHÔI PHỤC =====
 local offBtn = Instance.new("TextButton")
 offBtn.Size = UDim2.new(1, -20, 0, 32)
 offBtn.Position = UDim2.new(0, 10, 0, y)
@@ -1050,7 +1232,6 @@ end)
 y = y + 40
 scroll.CanvasSize = UDim2.new(0, 0, 0, y + 15)
 
--- ===== SLIDER LOGIC =====
 local draggingDist = false
 
 sliderBtn.MouseButton1Down:Connect(function() draggingDist = true end)
@@ -1102,6 +1283,15 @@ spawn(function()
     end
 end)
 
+-- Loop anti-fire: diệt lửa liên tục
+spawn(function()
+    while task.wait(0.75) do
+        if state.killFire then
+            pcall(toggleAntiFire, true)
+        end
+    end
+end)
+
 spawn(function()
     while task.wait(2) do
         if state.autoClean then
@@ -1120,6 +1310,7 @@ spawn(function()
                     pcall(function()
                         if v:IsA("Highlight") then v.Enabled = false end
                         if v:IsA("SelectionBox") or v:IsA("SelectionSphere") then v.Visible = false end
+                        if v:IsA("Explosion") then v:Destroy() end
                     end)
                 end
                 for _, v in ipairs(Lighting:GetChildren()) do
@@ -1128,6 +1319,13 @@ spawn(function()
             end
             collectgarbage("collect")
         end
+    end
+end)
+
+-- Loop GC bổ sung
+spawn(function()
+    while task.wait(3) do
+        pcall(function() collectgarbage("collect") end)
     end
 end)
 
@@ -1149,6 +1347,11 @@ LocalPlayer.CharacterAdded:Connect(function(char)
     if state.charSounds    then pcall(toggleCharSounds,    true) end
     if state.forceShadow   then pcall(toggleForceShadow,   true) end
     if state.removeEffects then pcall(toggleRemoveEffects, true) end
+    if state.killFire      then pcall(toggleAntiFire,      true) end
+    if state.debrisClean   then pcall(toggleDebrisClean,   true) end
+    if state.textureKill   then pcall(toggleTextureKill,   true) end
+    if state.soundKill     then pcall(toggleSoundKill,     true) end
+    if state.meshKill      then pcall(toggleMeshKill,      true) end
 end)
 
-print("🔧 FIXLAG_VN loaded! FPS Lock 45/60/90 sẵn sàng.")
+print("🔥 FIXLAG_VN PRO loaded! Anti-Fire + 5 module mới sẵn sàng.")

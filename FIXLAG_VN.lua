@@ -1,6 +1,6 @@
 -- =====================================================
--- FIXLAG_VN v6 — NO-DELETE OPTIMIZER
--- Tăng FPS mà KHÔNG xóa part nào
+-- FIXLAG_VN FINAL — Menu hoàn chỉnh, chạy được
+-- Tăng FPS KHÔNG XÓA + Ghost + Black + Async
 -- =====================================================
 local Lighting    = game:GetService("Lighting")
 local Workspace   = game:GetService("Workspace")
@@ -12,9 +12,20 @@ local StarterGui  = game:GetService("StarterGui")
 local LocalPlayer = Players.LocalPlayer
 local Cam         = Workspace.CurrentCamera
 
-for _, v in ipairs(game.CoreGui:GetChildren()) do
-    if v.Name == "FIXLAG_VN" then v:Destroy() end
-end
+-- Xóa GUI cũ (có pcall)
+pcall(function()
+    for _, v in ipairs(game.CoreGui:GetChildren()) do
+        if v.Name == "FIXLAG_VN" then v:Destroy() end
+    end
+end)
+pcall(function()
+    local pg = LocalPlayer:FindFirstChild("PlayerGui")
+    if pg then
+        for _, v in ipairs(pg:GetChildren()) do
+            if v.Name == "FIXLAG_VN" then v:Destroy() end
+        end
+    end
+end)
 
 -- =====================================================
 -- 🛡️ FORCE CoreGui
@@ -76,31 +87,18 @@ end
 local state = {
     ghostMap=false, ghostLevel=0.3,
     playerBlack=false, npcBlack=false,
-    -- NO-DELETE OPTIMIZERS
-    noShadow=false,           -- Tắt shadow toàn bộ
-    noTexture=false,          -- Bỏ texture (giữ part)
-    noMaterial=false,         -- Đổi tất cả sang Plastic
-    noGui3D=false,            -- Tắt SurfaceGui/BillboardGui
-    noEffect=false,           -- Tắt Particle/Trail/Beam
-    noLight=false,            -- Tắt đèn
-    noSound=false,            -- Tắt âm thanh
-    noAnim=false,             -- Stop animation
-    noPhysics=false,          -- Anchor mọi thứ
-    hideFar=false,            -- Ẩn part xa
-    lighting=false,
-    lowQuality=false,
-    cameraOpt=false,
-    autoClean=false,
-    cullDist=150,
+    noShadow=false, noTexture=false, noMaterial=false,
+    noGui3D=false, noEffect=false, noLight=false,
+    noSound=false, noAnim=false, noPhysics=false,
+    hideFar=false, lighting=false, lowQuality=false,
+    cameraOpt=false, autoClean=false, cullDist=150,
 }
 
 local saved = {
-    shadows={}, textures={}, materials={},
-    guis={}, effects={}, lights={}, sounds={},
-    anims={}, physics={}, parts={},
+    shadows={}, textures={}, materials={}, guis={}, effects={},
+    lights={}, sounds={}, physics={}, parts={},
     lighting={}, camSaved={}, connections={},
-    playerColors={}, npcColors={},
-    ghostParts={},
+    playerColors={}, npcColors={}, ghostParts={},
 }
 
 -- FPS counter
@@ -129,10 +127,8 @@ local function getPing()
 end
 
 -- =====================================================
--- 🎨 NO-DELETE OPTIMIZER FUNCTIONS
+-- OPTIMIZER FUNCTIONS
 -- =====================================================
-
--- 1. TẮT SHADOW (không xóa part)
 local function toggleNoShadow(on)
     if on then
         spawn(function()
@@ -149,7 +145,7 @@ local function toggleNoShadow(on)
                 end)
                 if i % 2000 == 0 then task.wait() end
             end
-            print("✅ Disabled shadow on", n, "parts")
+            print("✅ Shadow off:", n)
         end)
     else
         for _, s in ipairs(saved.shadows) do
@@ -159,7 +155,6 @@ local function toggleNoShadow(on)
     end
 end
 
--- 2. BỎ TEXTURE (giữ part, chỉ bỏ ảnh)
 local function toggleNoTexture(on)
     if on then
         spawn(function()
@@ -168,52 +163,35 @@ local function toggleNoTexture(on)
             for i = 1, #all do
                 local v = all[i]
                 pcall(function()
-                    -- MeshPart → TextureID = ""
                     if v:IsA("MeshPart") and v.TextureID ~= "" then
                         table.insert(saved.textures, {obj=v, key="TextureID", val=v.TextureID})
-                        v.TextureID = ""
-                        n = n + 1
+                        v.TextureID = ""; n = n + 1
                     end
-                    -- Decal → Transparency = 1
                     if v:IsA("Decal") and v.Transparency < 1 then
                         table.insert(saved.textures, {obj=v, key="Transparency", val=v.Transparency})
-                        v.Transparency = 1
-                        n = n + 1
+                        v.Transparency = 1; n = n + 1
                     end
-                    -- Texture → Transparency = 1
                     if v:IsA("Texture") and v.Transparency < 1 then
                         table.insert(saved.textures, {obj=v, key="Transparency", val=v.Transparency})
-                        v.Transparency = 1
-                        n = n + 1
+                        v.Transparency = 1; n = n + 1
                     end
-                    -- SpecialMesh → TextureId = ""
                     if v:IsA("SpecialMesh") and v.TextureId ~= "" then
                         table.insert(saved.textures, {obj=v, key="TextureId", val=v.TextureId})
-                        v.TextureId = ""
-                        n = n + 1
-                    end
-                    -- SurfaceAppearance → AlphaMode = Overlay
-                    if v:IsA("SurfaceAppearance") then
-                        table.insert(saved.textures, {obj=v, key="AlphaMode", val=v.AlphaMode})
-                        v.AlphaMode = Enum.AlphaMode.Overlay
-                        n = n + 1
+                        v.TextureId = ""; n = n + 1
                     end
                 end)
                 if i % 2000 == 0 then task.wait() end
             end
-            print("✅ Removed texture from", n, "objects")
+            print("✅ Texture off:", n)
         end)
     else
         for _, t in ipairs(saved.textures) do
-            pcall(function()
-                if t.obj and t.obj.Parent then t.obj[t.key] = t.val end
-            end)
+            pcall(function() if t.obj and t.obj.Parent then t.obj[t.key] = t.val end end)
         end
         saved.textures = {}
     end
 end
 
--- 3. ĐỔI MATERIAL → PLASTIC (giữ part)
 local function toggleNoMaterial(on)
     if on then
         spawn(function()
@@ -234,7 +212,7 @@ local function toggleNoMaterial(on)
                 end)
                 if i % 2000 == 0 then task.wait() end
             end
-            print("✅ Forced plastic on", n, "parts")
+            print("✅ Material off:", n)
         end)
     else
         for _, m in ipairs(saved.materials) do
@@ -244,7 +222,6 @@ local function toggleNoMaterial(on)
     end
 end
 
--- 4. TẮT SURFACEGUI/BILLBOARDGUI (giữ, không xóa)
 local function toggleNoGui3D(on)
     if on then
         spawn(function()
@@ -263,7 +240,7 @@ local function toggleNoGui3D(on)
                 end)
                 if i % 2000 == 0 then task.wait() end
             end
-            print("✅ Disabled", n, "Gui3D")
+            print("✅ Gui3D off:", n)
         end)
     else
         for _, g in ipairs(saved.guis) do
@@ -273,7 +250,6 @@ local function toggleNoGui3D(on)
     end
 end
 
--- 5. TẮT EFFECTS (giữ, không xóa)
 local function toggleNoEffect(on)
     if on then
         spawn(function()
@@ -294,7 +270,7 @@ local function toggleNoEffect(on)
                 end)
                 if i % 2000 == 0 then task.wait() end
             end
-            print("✅ Disabled", n, "effects")
+            print("✅ Effects off:", n)
         end)
     else
         for _, e in ipairs(saved.effects) do
@@ -304,7 +280,6 @@ local function toggleNoEffect(on)
     end
 end
 
--- 6. TẮT ĐÈN (giữ, không xóa)
 local function toggleNoLight(on)
     if on then
         spawn(function()
@@ -323,7 +298,7 @@ local function toggleNoLight(on)
                 end)
                 if i % 2000 == 0 then task.wait() end
             end
-            print("✅ Disabled", n, "lights")
+            print("✅ Lights off:", n)
         end)
     else
         for _, l in ipairs(saved.lights) do
@@ -333,7 +308,6 @@ local function toggleNoLight(on)
     end
 end
 
--- 7. TẮT ÂM THANH (giữ, volume = 0)
 local function toggleNoSound(on)
     if on then
         spawn(function()
@@ -351,7 +325,7 @@ local function toggleNoSound(on)
                 if i % 2000 == 0 then task.wait() end
             end
             pcall(function() SoundSvc.AmbientReverb = Enum.ReverbType.NoReverb end)
-            print("✅ Muted", n, "sounds")
+            print("✅ Sounds muted:", n)
         end)
     else
         for _, s in ipairs(saved.sounds) do
@@ -361,7 +335,6 @@ local function toggleNoSound(on)
     end
 end
 
--- 8. STOP ANIMATION NPC (giữ NPC)
 local function toggleNoAnim(on)
     if on then
         spawn(function()
@@ -378,7 +351,6 @@ local function toggleNoAnim(on)
                 end)
                 if i % 2000 == 0 then task.wait() end
             end
-            -- Humanoid NPC → tắt state
             for i = 1, #all do
                 local v = all[i]
                 pcall(function()
@@ -386,18 +358,15 @@ local function toggleNoAnim(on)
                         v.EvaluateStateMachine = false
                         v:SetStateEnabled(Enum.HumanoidStateType.Running, false)
                         v:SetStateEnabled(Enum.HumanoidStateType.Jumping, false)
-                        v:SetStateEnabled(Enum.HumanoidStateType.Climbing, false)
-                        v:SetStateEnabled(Enum.HumanoidStateType.FallingDown, false)
                     end
                 end)
                 if i % 2000 == 0 then task.wait() end
             end
-            print("✅ Stopped", n, "animators")
+            print("✅ Anims stopped:", n)
         end)
     end
 end
 
--- 9. FREEZE PHYSICS (giữ part, chỉ anchor)
 local function toggleNoPhysics(on)
     if on then
         spawn(function()
@@ -408,7 +377,7 @@ local function toggleNoPhysics(on)
                 local v = all[i]
                 pcall(function()
                     if v:IsA("BasePart") and not v.Anchored then
-                        if v:IsDescendantOf(myChar) then return end
+                        if myChar and v:IsDescendantOf(myChar) then return end
                         table.insert(saved.physics, {obj=v})
                         v.Anchored = true
                         v.CanTouch = false
@@ -418,7 +387,7 @@ local function toggleNoPhysics(on)
                 end)
                 if i % 2000 == 0 then task.wait() end
             end
-            print("✅ Froze", n, "parts")
+            print("✅ Physics frozen:", n)
         end)
     else
         for _, p in ipairs(saved.physics) do
@@ -434,7 +403,6 @@ local function toggleNoPhysics(on)
     end
 end
 
--- 10. ẨN PART XA (giữ, chỉ transparency = 1)
 local function toggleHideFar(on)
     if on then
         spawn(function()
@@ -458,7 +426,7 @@ local function toggleHideFar(on)
                 end)
                 if i % 2000 == 0 then task.wait() end
             end
-            print("✅ Hid", n, "far parts")
+            print("✅ Far parts hidden:", n)
         end)
     else
         for _, p in ipairs(saved.parts) do
@@ -468,7 +436,6 @@ local function toggleHideFar(on)
     end
 end
 
--- 11. TỐI ƯU LIGHTING (tắt post effects)
 local function toggleLighting(on)
     if on then
         saved.lighting = {
@@ -484,9 +451,7 @@ local function toggleLighting(on)
         Lighting.OutdoorAmbient = Color3.fromRGB(120,120,120)
         Lighting.FogEnd = 300
         Lighting.FogStart = 100
-        pcall(function()
-            Lighting.Technology = Enum.Technology.Compatibility
-        end)
+        pcall(function() Lighting.Technology = Enum.Technology.Compatibility end)
         for _, v in ipairs(Lighting:GetChildren()) do
             pcall(function()
                 if v:IsA("PostEffect") then v.Enabled = false
@@ -510,25 +475,17 @@ local function toggleLighting(on)
     end
 end
 
--- 12. CHẤT LƯỢNG THẤP
 local function toggleLowQuality(on)
     local ok, cur = pcall(function() return settings().Rendering.QualityLevel end)
     if on then
         saved.quality = ok and cur or Enum.QualityLevel.Automatic
-        pcall(function()
-            settings().Rendering.QualityLevel = Enum.QualityLevel.Level01
-        end)
-        pcall(function()
-            settings().Rendering.MeshPartDetailLevel = Enum.MeshPartDetailLevel.Level01
-        end)
+        pcall(function() settings().Rendering.QualityLevel = Enum.QualityLevel.Level01 end)
+        pcall(function() settings().Rendering.MeshPartDetailLevel = Enum.MeshPartDetailLevel.Level01 end)
     else
-        pcall(function()
-            settings().Rendering.QualityLevel = saved.quality or Enum.QualityLevel.Automatic
-        end)
+        pcall(function() settings().Rendering.QualityLevel = saved.quality or Enum.QualityLevel.Automatic end)
     end
 end
 
--- 13. CAMERA OPTIMIZE (giảm FarPlane)
 local function toggleCameraOpt(on)
     if on then
         saved.camSaved.FOV = Cam.FieldOfView
@@ -553,8 +510,109 @@ local function toggleCameraOpt(on)
     end
 end
 
+-- Ghost
+local function toggleGhostMap(on)
+    if on then
+        spawn(function()
+            local level = state.ghostLevel
+            local all = Workspace:GetDescendants()
+            local n = 0
+            for i = 1, #all do
+                local v = all[i]
+                pcall(function()
+                    if v:IsA("BasePart") and not isPartOfAnyCharacter(v) then
+                        if v.Transparency < level and v.Transparency < 0.98 then
+                            if not v:GetAttribute("GhostOrig") then
+                                v:SetAttribute("GhostOrig", v.Transparency)
+                                table.insert(saved.ghostParts, {obj=v, t=v.Transparency})
+                            end
+                            v.Transparency = math.max(v.Transparency, level)
+                            n = n + 1
+                        end
+                    end
+                end)
+                if i % 2000 == 0 then task.wait() end
+            end
+            print("✅ Ghost:", n)
+        end)
+    else
+        for _, d in ipairs(saved.ghostParts) do
+            pcall(function() if d.obj and d.obj.Parent then d.obj.Transparency = d.t end end)
+        end
+        saved.ghostParts = {}
+    end
+end
+
+-- Black
+local function makeBlack(char, saveList)
+    if not char then return end
+    for _, v in ipairs(char:GetDescendants()) do
+        pcall(function()
+            if v:IsA("BasePart") then
+                if v.Material == Enum.Material.Neon or v.Material == Enum.Material.Glass then return end
+                if v.Transparency > 0.5 then return end
+                if not v:GetAttribute("BlackOrig") then
+                    v:SetAttribute("BlackOrig", v.Color)
+                    table.insert(saveList, {obj=v, c=v.Color, m=v.Material, t=v.Transparency})
+                end
+                v.Color = Color3.fromRGB(0,0,0)
+                v.Material = Enum.Material.SmoothPlastic
+                v.Transparency = 0
+                v.CastShadow = false
+            end
+        end)
+    end
+end
+
+local function restoreChar(saveList)
+    for _, d in ipairs(saveList) do
+        pcall(function()
+            if d.obj and d.obj.Parent then
+                if d.c then d.obj.Color = d.c end
+                if d.m then d.obj.Material = d.m end
+                if d.t then d.obj.Transparency = d.t end
+            end
+        end)
+    end
+end
+
+local function togglePlayerBlack(on)
+    if on then
+        for _, plr in ipairs(Players:GetPlayers()) do
+            if plr ~= LocalPlayer and plr.Character then
+                makeBlack(plr.Character, saved.playerColors)
+            end
+        end
+    else
+        restoreChar(saved.playerColors); saved.playerColors = {}
+    end
+end
+
+local function toggleNpcBlack(on)
+    if on then
+        spawn(function()
+            local all = Workspace:GetDescendants()
+            for i = 1, #all do
+                local v = all[i]
+                if v:IsA("Humanoid") then
+                    pcall(function()
+                        local model = v.Parent
+                        if model and model ~= LocalPlayer.Character then
+                            local isPlayer = Players:GetPlayerFromCharacter(model)
+                            if not isPlayer then makeBlack(model, saved.npcColors) end
+                        end
+                    end)
+                end
+                if i % 1000 == 0 then task.wait() end
+            end
+        end)
+    else
+        restoreChar(saved.npcColors); saved.npcColors = {}
+    end
+end
+
 -- =====================================================
--- ⚡ ONE-CLICK OPTIMIZE (không xóa gì cả)
+-- MASTER OPTIMIZE
 -- =====================================================
 local optimizing = false
 
@@ -564,19 +622,19 @@ local function runOptimize()
 
     spawn(function()
         local steps = {
-            {fn = toggleLighting,      label = "Lighting",        wait = 0.05},
-            {fn = toggleLowQuality,    label = "Quality",         wait = 0.05},
-            {fn = toggleCameraOpt,     label = "Camera",          wait = 0.05},
-            {fn = toggleNoShadow,      label = "Shadow",          wait = 0.1},
-            {fn = toggleNoMaterial,    label = "Material",        wait = 0.1},
-            {fn = toggleNoGui3D,       label = "Gui3D",           wait = 0.1},
-            {fn = toggleNoEffect,      label = "Effects",         wait = 0.1},
-            {fn = toggleNoTexture,     label = "Texture",         wait = 0.1},
-            {fn = toggleNoLight,       label = "Lights",          wait = 0.1},
-            {fn = toggleNoSound,       label = "Sounds",          wait = 0.1},
-            {fn = toggleNoAnim,        label = "Animations",      wait = 0.1},
-            {fn = toggleNoPhysics,     label = "Physics",         wait = 0.1},
-            {fn = toggleHideFar,       label = "HideFar",         wait = 0.1},
+            {fn = toggleLighting,   name = "Lighting",   w = 0.05},
+            {fn = toggleLowQuality, name = "Quality",    w = 0.05},
+            {fn = toggleCameraOpt,  name = "Camera",     w = 0.05},
+            {fn = toggleNoShadow,   name = "Shadow",     w = 0.1},
+            {fn = toggleNoMaterial, name = "Material",   w = 0.1},
+            {fn = toggleNoGui3D,    name = "Gui3D",      w = 0.1},
+            {fn = toggleNoEffect,   name = "Effects",    w = 0.1},
+            {fn = toggleNoTexture,  name = "Texture",    w = 0.1},
+            {fn = toggleNoLight,    name = "Lights",     w = 0.1},
+            {fn = toggleNoSound,    name = "Sounds",     w = 0.1},
+            {fn = toggleNoAnim,     name = "Animations", w = 0.1},
+            {fn = toggleNoPhysics,  name = "Physics",    w = 0.1},
+            {fn = toggleHideFar,    name = "HideFar",    w = 0.1},
         }
 
         for i, s in ipairs(steps) do
@@ -584,10 +642,10 @@ local function runOptimize()
             local pct = math.floor(i / #steps * 100)
             if _G_optBtn then
                 pcall(function()
-                    _G_optBtn.Text = string.format("⚡ ĐANG TỐI ƯU... %d%% (%s)", pct, s.label)
+                    _G_optBtn.Text = string.format("⚡ ĐANG TỐI ƯU... %d%%\n(%s)", pct, s.name)
                 end)
             end
-            task.wait(s.wait)
+            task.wait(s.w)
         end
 
         state.autoClean = true
@@ -595,11 +653,11 @@ local function runOptimize()
 
         if _G_optBtn then
             pcall(function()
-                _G_optBtn.Text = "⚡ TỐI ƯU FPS (KHÔNG XÓA)\n(ĐÃ TỐI ƯU - FPS TĂNG)"
+                _G_optBtn.Text = "⚡ TỐI ƯU FPS (ĐÃ BẬT)\nBẤM ĐỂ TẮT + KHÔI PHỤC"
                 _G_optBtn.BackgroundColor3 = Color3.fromRGB(0, 180, 80)
             end)
         end
-        print("⚡ OPTIMIZE DONE! Không xóa bất cứ part nào.")
+        print("⚡ OPTIMIZE DONE!")
     end)
 end
 
@@ -621,7 +679,7 @@ local function restoreAll()
         pcall(toggleLighting, false)
         if _G_optBtn then
             pcall(function()
-                _G_optBtn.Text = "⚡ TỐI ƯU FPS (KHÔNG XÓA)"
+                _G_optBtn.Text = "⚡ TỐI ƯU FPS (KHÔNG XÓA)\nTĂNG FPS MÀ GIỮ MAP NGUYÊN"
                 _G_optBtn.BackgroundColor3 = Color3.fromRGB(20, 100, 180)
             end)
         end
@@ -629,18 +687,63 @@ local function restoreAll()
 end
 
 -- =====================================================
--- GUI
+-- GUI — TẠO VỚI FALLBACK
 -- =====================================================
 local gui = Instance.new("ScreenGui")
-gui.Name = "FIXLAG_VN"; gui.ResetOnSpawn = false
-gui.IgnoreGuiInset = true; gui.Parent = game.CoreGui
+gui.Name = "FIXLAG_VN"
+gui.ResetOnSpawn = false
+gui.IgnoreGuiInset = true
+gui.DisplayOrder = 999
+gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 
+-- Thử parent theo thứ tự: gethui → CoreGui → PlayerGui
+local parented = false
+
+-- 1. gethui (executor có hỗ trợ)
+pcall(function()
+    if gethui then
+        gui.Parent = gethui()
+        parented = true
+    end
+end)
+
+-- 2. CoreGui
+if not parented then
+    pcall(function()
+        gui.Parent = game.CoreGui
+        parented = true
+    end)
+end
+
+-- 3. PlayerGui
+if not parented then
+    pcall(function()
+        local pg = LocalPlayer:FindFirstChild("PlayerGui") or LocalPlayer:WaitForChild("PlayerGui", 5)
+        if pg then
+            gui.Parent = pg
+            parented = true
+        end
+    end)
+end
+
+if not parented then
+    warn("[FIXLAG] ❌ Không gán được GUI!")
+    return
+end
+
+print("✅ [FIXLAG] GUI đã tạo thành công!")
+
+-- =====================================================
+-- FPS Frame
+-- =====================================================
 local fpsFrame = Instance.new("Frame")
 fpsFrame.Size = UDim2.new(0, 220, 0, 70)
 fpsFrame.Position = UDim2.new(0, 15, 0, 15)
 fpsFrame.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
 fpsFrame.BackgroundTransparency = 0.1
-fpsFrame.BorderSizePixel = 0; fpsFrame.Active = true; fpsFrame.Draggable = true
+fpsFrame.BorderSizePixel = 0
+fpsFrame.Active = true
+fpsFrame.Draggable = true
 fpsFrame.Parent = gui
 Instance.new("UICorner", fpsFrame).CornerRadius = UDim.new(0, 10)
 local fpsStroke = Instance.new("UIStroke", fpsFrame)
@@ -666,18 +769,22 @@ spawn(function()
     end
 end)
 
+-- =====================================================
+-- MENU
+-- =====================================================
 local menu = Instance.new("Frame")
-menu.Size = UDim2.new(0, 360, 0, 640)
+menu.Size = UDim2.new(0, 360, 0, 600)
 menu.Position = UDim2.new(0, 15, 0, 95)
 menu.BackgroundColor3 = Color3.fromRGB(5, 5, 10)
-menu.BorderSizePixel = 0; menu.Active = true; menu.Draggable = true; menu.Parent = gui
+menu.BorderSizePixel = 0; menu.Active = true; menu.Draggable = true
+menu.Parent = gui
 Instance.new("UICorner", menu).CornerRadius = UDim.new(0, 14)
 local mStroke = Instance.new("UIStroke", menu)
 mStroke.Color = Color3.fromRGB(0, 200, 255); mStroke.Thickness = 2
 
 local title = Instance.new("TextLabel")
 title.Size = UDim2.new(1, -40, 0, 34); title.Position = UDim2.new(0, 10, 0, 3)
-title.BackgroundTransparency = 1; title.Text = "⚡ FIXLAG_VN v6 (NO-DELETE)"
+title.BackgroundTransparency = 1; title.Text = "⚡ FIXLAG_VN FINAL"
 title.Font = Enum.Font.GothamBold; title.TextSize = 13
 title.TextColor3 = Color3.fromRGB(0, 220, 255)
 title.TextXAlignment = Enum.TextXAlignment.Left; title.Parent = menu
@@ -700,7 +807,7 @@ scroll.ScrollingDirection = Enum.ScrollingDirection.Y; scroll.Parent = menu
 local collapsed = false
 minBtn.MouseButton1Click:Connect(function()
     collapsed = not collapsed; scroll.Visible = not collapsed
-    menu.Size = collapsed and UDim2.new(0, 360, 0, 40) or UDim2.new(0, 360, 0, 640)
+    menu.Size = collapsed and UDim2.new(0, 360, 0, 40) or UDim2.new(0, 360, 0, 600)
     minBtn.Text = collapsed and "+" or "–"
 end)
 
@@ -719,7 +826,7 @@ local function makeToggle(label, yPos, key, fn, color)
         btn.Text = (on and "● " or "○ ") .. label
         pcall(fn, on)
     end)
-    buttons[key] = {btn = btn, label = label, color = color}
+    buttons[key] = {btn = btn, label = label, color = color, key = key}
 end
 
 local y = 5
@@ -771,24 +878,29 @@ end)
 
 y = y + 86
 
+header("🎨 GHOST / BLACK", Color3.fromRGB(200, 200, 255))
+add("👻 Ghost Map", "ghostMap", toggleGhostMap, Color3.fromRGB(40, 40, 60))
+add("⚫ Player Black", "playerBlack", togglePlayerBlack, Color3.fromRGB(30, 0, 0))
+add("⚫ NPC Black", "npcBlack", toggleNpcBlack, Color3.fromRGB(30, 0, 0))
+
 header("⚡ NO-DELETE OPTIMIZERS", Color3.fromRGB(0, 220, 255))
-add("🚫 Tắt SHADOW (tăng FPS 15%)",  "noShadow",   toggleNoShadow,   Color3.fromRGB(30, 40, 55))
-add("🚫 Bỏ TEXTURE (giữ part)",      "noTexture",  toggleNoTexture,  Color3.fromRGB(30, 40, 55))
-add("🚫 Đổi MATERIAL → Plastic",     "noMaterial", toggleNoMaterial, Color3.fromRGB(30, 40, 55))
-add("🚫 Tắt GUI 3D (Surface/Bill)",  "noGui3D",    toggleNoGui3D,    Color3.fromRGB(30, 40, 55))
-add("🚫 Tắt EFFECTS (Particle/Beam)","noEffect",   toggleNoEffect,   Color3.fromRGB(30, 40, 55))
-add("🚫 Tắt ĐÈN (giữ nguyên)",       "noLight",    toggleNoLight,    Color3.fromRGB(30, 40, 55))
-add("🚫 Tắt ÂM THANH (giữ part)",    "noSound",    toggleNoSound,    Color3.fromRGB(30, 40, 55))
-add("🚫 Stop ANIMATION NPC",         "noAnim",     toggleNoAnim,     Color3.fromRGB(30, 40, 55))
-add("🚫 Freeze PHYSICS (Anchor)",    "noPhysics",  toggleNoPhysics,  Color3.fromRGB(30, 40, 55))
-add("🚫 Ẩn part XA (transparency=1)", "hideFar",   toggleHideFar,    Color3.fromRGB(30, 40, 55))
+add("🚫 Tắt SHADOW", "noShadow", toggleNoShadow, Color3.fromRGB(30, 40, 55))
+add("🚫 Bỏ TEXTURE", "noTexture", toggleNoTexture, Color3.fromRGB(30, 40, 55))
+add("🚫 MATERIAL → Plastic", "noMaterial", toggleNoMaterial, Color3.fromRGB(30, 40, 55))
+add("🚫 Tắt GUI 3D", "noGui3D", toggleNoGui3D, Color3.fromRGB(30, 40, 55))
+add("🚫 Tắt EFFECTS", "noEffect", toggleNoEffect, Color3.fromRGB(30, 40, 55))
+add("🚫 Tắt ĐÈN", "noLight", toggleNoLight, Color3.fromRGB(30, 40, 55))
+add("🚫 Tắt ÂM THANH", "noSound", toggleNoSound, Color3.fromRGB(30, 40, 55))
+add("🚫 Stop ANIMATION", "noAnim", toggleNoAnim, Color3.fromRGB(30, 40, 55))
+add("🚫 Freeze PHYSICS", "noPhysics", toggleNoPhysics, Color3.fromRGB(30, 40, 55))
+add("🚫 Ẩn part XA", "hideFar", toggleHideFar, Color3.fromRGB(30, 40, 55))
 
 header("⚙️ RENDER SETTINGS", Color3.fromRGB(100, 200, 255))
-add("💡 Tối ưu LIGHTING",      "lighting",    toggleLighting,    Color3.fromRGB(40, 50, 70))
-add("📉 Chất lượng THẤP NHẤT", "lowQuality",  toggleLowQuality,  Color3.fromRGB(40, 50, 70))
-add("📷 CAMERA OPTIMIZE",      "cameraOpt",   toggleCameraOpt,   Color3.fromRGB(40, 50, 70))
+add("💡 Tối ưu LIGHTING", "lighting", toggleLighting, Color3.fromRGB(40, 50, 70))
+add("📉 Chất lượng THẤP", "lowQuality", toggleLowQuality, Color3.fromRGB(40, 50, 70))
+add("📷 CAMERA OPTIMIZE", "cameraOpt", toggleCameraOpt, Color3.fromRGB(40, 50, 70))
 
--- Slider
+-- Slider CULL
 header("📏 CULL DISTANCE", Color3.fromRGB(255, 200, 100))
 local distLabel = Instance.new("TextLabel")
 distLabel.Size = UDim2.new(1, -20, 0, 20); distLabel.Position = UDim2.new(0, 10, 0, y)
@@ -817,7 +929,6 @@ sliderBtn.Parent = sliderBg
 Instance.new("UICorner", sliderBtn).CornerRadius = UDim.new(1, 0)
 
 y = y + 20
-
 local draggingDist = false
 sliderBtn.MouseButton1Down:Connect(function() draggingDist = true end)
 sliderBtn.MouseButton1Up:Connect(function() draggingDist = false end)
@@ -833,7 +944,7 @@ Instance.new("UICorner", restoreBtn).CornerRadius = UDim.new(0, 10)
 restoreBtn.MouseButton1Click:Connect(function()
     restoreAll()
     for _, data in pairs(buttons) do
-        state[data.key or ""] = false
+        state[data.key] = false
         data.btn.BackgroundColor3 = data.color or Color3.fromRGB(30, 40, 55)
         data.btn.TextColor3 = Color3.fromRGB(200, 200, 200)
         data.btn.Text = "○ " .. data.label
@@ -862,7 +973,7 @@ gui.InputEnded:Connect(function(input)
     end
 end)
 
--- AUTO CLEAN
+-- Auto-clean
 spawn(function()
     while task.wait(0.5) do
         if state.autoClean then
@@ -891,4 +1002,5 @@ LocalPlayer.CharacterAdded:Connect(function(char)
     forceEnableCoreGui()
 end)
 
-print("⚡ FIXLAG_VN v6 NO-DELETE loaded! Tăng FPS mà không xóa gì.")
+print("✅ FIXLAG_VN FINAL loaded! Menu hiện rồi nhé.")
+print("💡 Nếu không thấy menu → chạy lệnh: game.CoreGui:FindFirstChild('FIXLAG_VN')")

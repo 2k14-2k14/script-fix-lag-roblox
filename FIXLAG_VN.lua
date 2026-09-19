@@ -1,6 +1,6 @@
 -- =====================================================
 -- FIXLAG_VN 
--- Fix lỗi xóa map, giữ lại baseplate/ground/spawn
+-- Fix FPS + Fix xám đen + Giữ NPC
 -- =====================================================
 local Lighting    = game:GetService("Lighting")
 local Workspace   = game:GetService("Workspace")
@@ -17,17 +17,13 @@ for _, v in ipairs(game.CoreGui:GetChildren()) do
 end
 
 -- =====================================================
--- 🛡️ WHITELIST — KHÔNG BAO GIỜ XÓA
+-- 🛡️ WHITELIST
 -- =====================================================
 local PROTECTED_NAMES = {
-    "baseplate", "base", "ground", "floor", "platform", "spawn",
-    "terrain", "world", "map", "zone", "area", "region",
-    "start", "lobby", "hub", "main", "center", "root",
-    "foundation", "pavement", "road", "path", "walkway",
-}
-
-local PROTECTED_MATERIALS = {
-    -- Bất kỳ part nào làm sàn/đất đều bảo vệ
+    "baseplate","base","ground","floor","platform","spawn",
+    "terrain","world","map","zone","area","region",
+    "start","lobby","hub","main","center","root",
+    "foundation","pavement","road","path","walkway",
 }
 
 local function isProtected(p)
@@ -36,47 +32,44 @@ local function isProtected(p)
     for _, k in ipairs(PROTECTED_NAMES) do
         if n:find(k) then return true end
     end
-    -- Bảo vệ mọi part nằm ở Y thấp (đất, sàn)
     if p:IsA("BasePart") then
         local root = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-        if root and p.Position.Y < root.Position.Y - 5 then
-            return true  -- Nằm dưới nhân vật = đất/sàn
-        end
-        -- Bảo vệ part siêu to (thường là baseplate)
+        if root and p.Position.Y < root.Position.Y - 5 then return true end
         local s = p.Size
         if s.X > 100 or s.Z > 100 then return true end
     end
     return false
 end
 
-local function isCharDescendant(p, char)
-    if not char then return false end
-    return p:IsDescendantOf(char)
+local function isNPC(model)
+    if not model or model == LocalPlayer.Character then return false end
+    if not model:IsA("Model") then return false end
+    return model:FindFirstChildOfClass("Humanoid") ~= nil
 end
 
 -- =====================================================
 -- STATE
 -- =====================================================
 local state = {
-    -- PRO
     lighting=false, decals=false, effects=false, hideFar=false,
     lowQuality=false, accessories=false, npcFreeze=false, gui3d=false,
     atmosphere=false, physics=false, stripChar=false, skybox=false,
     terrain=false, killLights=false, bwMode=false,
     nametags=false, charSounds=false, forceShadow=false, removeEffects=false,
-    killFire=false, debrisClean=false, textureKill=false, soundKill=false, meshKill=false,
-    -- NUCLEAR (an toàn)
-    nukeOthers=false, nukeNPCs=false, anchorAll=false, killAllSound=false,
-    killAllGui=false, killAllBeam=false, smoothAll=false, stripTextureAll=false,
+    killFire=false, debrisClean=false, textureKill=false, soundKill=false,
+    -- NPC GRayscale
+    npcGray=false, npcFlat=false, npcNoAnim=false,
+    -- NUCLEAR
+    killAllSound=false, killAllGui=false, killAllBeam=false,
     blockSpawn=false, killTools=false, stopAnims=false, killDecor2=false,
     aggressiveGC=false,
-    -- ULTRA (an toàn - chỉ effects)
-    ultraDestroy=false, destroyOthers=false, destroyNPCs=false,
+    -- ULTRA
+    ultraDestroy=false, destroyOthers=false,
     killWelds=false, killHumanoids=false, massDeleteName=false,
-    destroyAttachments=false, killScripts=false, unloadMeshes=false, killCoreGui=false,
-    renderDistZero=false, instantGC=false, killAnimator=false,
-    forceMinGraphics=false, deleteTools=false, killSoundsSvc=false,
-    -- SAFE PURGE (xóa vừa phải, an toàn)
+    destroyAttachments=false, killScripts=false, unloadMeshes=false,
+    killCoreGui=false, renderDistZero=false, instantGC=false,
+    killAnimator=false, forceMinGraphics=false, deleteTools=false, killSoundsSvc=false,
+    -- SAFE PURGE
     safePurge=false, purgeEffectsOnly=false, purgeDecalsSafe=false,
     purgeSmallPartsSafe=false, purgeByMoreNamesSafe=false,
     purgeParticleModels=false, purgeAccessoriesGlobal=false,
@@ -93,23 +86,41 @@ local saved = {
     materials={}, allTextures={}, tools={}, connections={},
     colliders={}, scripts={}, meshIds={},
     nulled={}, scripts2={}, camKids={}, playerGuis={},
+    -- NPC gray
+    npcColors={}, npcMaterials={}, npcAnims={},
 }
 
 -- =====================================================
--- HELPERS
+-- FPS COUNTER (FIX)
 -- =====================================================
-local function isFireColor(c)
-    if not c then return false end
-    local r, g, b = c.R, c.G, c.B
-    return (r > 0.55 and g < 0.6 and b < 0.4)
-        or (r > 0.7 and g > 0.25 and g < 0.85 and b < 0.35)
+local fpsFrames, fpsStart, fpsLast, fpsFallback = 0, os.clock(), 0, 0
+RunService.RenderStepped:Connect(function()
+    local now = os.clock()
+    if now - fpsLast < 0.001 then return end
+    fpsLast = now
+    fpsFrames = fpsFrames + 1
+    if now - fpsStart >= 1 then
+        fpsFallback = math.floor(fpsFrames / (now - fpsStart) + 0.5)
+        fpsFrames, fpsStart = 0, now
+    end
+end)
+
+local function getRealFPS()
+    local ok, v = pcall(function() return Stats.RenderFPS:GetValue() end)
+    if ok and type(v) == "number" and v > 0 and v < 1000 then return math.floor(v + 0.5) end
+    ok, v = pcall(function() return Stats.FrameTime:GetValue() end)
+    if ok and type(v) == "number" and v > 0 and v < 1 then return math.floor(1 / v + 0.5) end
+    return fpsFallback
 end
-local function isFireTexture(t)
-    if not t then return false end
-    t = t:lower()
-    return t:find("fire") or t:find("flame") or t:find("ember")
-        or t:find("spark") or t:find("burn") or t:find("explosion")
+
+local function getPing()
+    local ok, p = pcall(function()
+        return Stats.Network.ServerStatsItem["Data Ping"]:GetValue()
+    end)
+    if ok and type(p) == "number" then return math.floor(p) end
+    return 0
 end
+
 local function getOrigin()
     local char = LocalPlayer.Character
     if char and char:FindFirstChild("HumanoidRootPart") then
@@ -117,6 +128,7 @@ local function getOrigin()
     end
     return nil, nil
 end
+
 local function shouldSkipPart(p, origin)
     local s = p.Size
     if s.X > 40 or s.Y > 40 or s.Z > 40 then return true end
@@ -124,17 +136,173 @@ local function shouldSkipPart(p, origin)
     if origin and p.Position.Y < origin.Y - 3 then return true end
     return false
 end
-local function getRealFPS()
-    local ok, v = pcall(function() return Stats.RenderFPS:GetValue() end)
-    if ok and type(v) == "number" and v > 0 and v < 1000 then return math.floor(v + 0.5) end
-    return 0
+
+local function isFireColor(c)
+    if not c then return false end
+    local r, g, b = c.R, c.G, c.B
+    return (r > 0.55 and g < 0.6 and b < 0.4)
+        or (r > 0.7 and g > 0.25 and g < 0.85 and b < 0.35)
 end
-local function getPing()
-    local ok, p = pcall(function()
-        return Stats.Network.ServerStatsItem["Data Ping"]:GetValue()
-    end)
-    if ok and type(p) == "number" then return math.floor(p) end
-    return 0
+
+local function isFireTexture(t)
+    if not t then return false end
+    t = t:lower()
+    return t:find("fire") or t:find("flame") or t:find("ember")
+        or t:find("spark") or t:find("burn") or t:find("explosion")
+end
+
+-- =====================================================
+-- 🎨 NPC GRAYSCALE — Chuyển NPC thành trắng đen
+-- =====================================================
+local function colorToGray(c)
+    if not c then return Color3.new(0.5, 0.5, 0.5) end
+    local gray = c.R * 0.299 + c.G * 0.587 + c.B * 0.114
+    return Color3.new(gray, gray, gray)
+end
+
+local function toggleNpcGray(on)
+    if on then
+        for _, plr in ipairs(Players:GetPlayers()) do
+            if plr ~= LocalPlayer and plr.Character then
+                for _, v in ipairs(plr.Character:GetDescendants()) do
+                    pcall(function()
+                        if v:IsA("BasePart") then
+                            -- Lưu màu gốc
+                            if not v:GetAttribute("OrigColor") then
+                                v:SetAttribute("OrigColor", v.Color)
+                            end
+                            table.insert(saved.npcColors, {obj=v, c=v.Color})
+                            v.Color = colorToGray(v.Color)
+                        end
+                        if v:IsA("Decal") or v:IsA("Texture") then
+                            if not v:GetAttribute("OrigTrans") then
+                                v:SetAttribute("OrigTrans", v.Transparency)
+                            end
+                            table.insert(saved.npcColors, {obj=v, t=v.Transparency})
+                            v.Transparency = 0.5
+                        end
+                        if v:IsA("Shirt") or v:IsA("Pants") or v:IsA("ShirtGraphic") then
+                            table.insert(saved.npcColors, {obj=v, t=v.Parent})
+                            v.Parent = nil
+                        end
+                    end)
+                end
+            end
+        end
+        -- Theo dõi NPC mới spawn
+        if saved.connections.npcGray then saved.connections.npcGray:Disconnect() end
+        saved.connections.npcGray = Players.PlayerAdded:Connect(function(plr)
+            plr.CharacterAdded:Connect(function(char)
+                task.wait(2)
+                if state.npcGray then
+                    for _, v in ipairs(char:GetDescendants()) do
+                        pcall(function()
+                            if v:IsA("BasePart") then
+                                table.insert(saved.npcColors, {obj=v, c=v.Color})
+                                v.Color = colorToGray(v.Color)
+                            end
+                            if v:IsA("Shirt") or v:IsA("Pants") or v:IsA("ShirtGraphic") then
+                                table.insert(saved.npcColors, {obj=v, t=v.Parent})
+                                v.Parent = nil
+                            end
+                        end)
+                    end
+                end
+            end)
+        end)
+    else
+        for _, d in ipairs(saved.npcColors) do
+            pcall(function()
+                if d.obj and d.obj.Parent then
+                    if d.c then d.obj.Color = d.c end
+                    if d.t and typeof(d.t) == "number" then d.obj.Transparency = d.t end
+                    if d.t and typeof(d.t) == "Instance" then d.obj.Parent = d.t end
+                end
+            end)
+        end
+        saved.npcColors = {}
+        if saved.connections.npcGray then
+            saved.connections.npcGray:Disconnect()
+            saved.connections.npcGray = nil
+        end
+    end
+end
+
+-- NPC FLAT — Material SmoothPlastic (render nhẹ hơn)
+local function toggleNpcFlat(on)
+    if on then
+        for _, plr in ipairs(Players:GetPlayers()) do
+            if plr ~= LocalPlayer and plr.Character then
+                for _, v in ipairs(plr.Character:GetDescendants()) do
+                    pcall(function()
+                        if v:IsA("BasePart") and v.Material ~= Enum.Material.SmoothPlastic then
+                            table.insert(saved.npcMaterials, {obj=v, m=v.Material})
+                            v.Material = Enum.Material.SmoothPlastic
+                        end
+                        if v:IsA("Accessory") or v:IsA("Hat") then
+                            table.insert(saved.npcMaterials, {obj=v, p=v.Parent})
+                            v.Parent = nil
+                        end
+                    end)
+                end
+            end
+        end
+    else
+        for _, m in ipairs(saved.npcMaterials) do
+            pcall(function()
+                if m.obj and m.obj.Parent then
+                    if m.m then m.obj.Material = m.m end
+                    if m.p then m.obj.Parent = m.p end
+                end
+            end)
+        end
+        saved.npcMaterials = {}
+    end
+end
+
+-- NPC NO ANIM — Stop animation NPC
+local function toggleNpcNoAnim(on)
+    if on then
+        for _, plr in ipairs(Players:GetPlayers()) do
+            if plr ~= LocalPlayer and plr.Character then
+                local hum = plr.Character:FindFirstChildOfClass("Humanoid")
+                if hum then
+                    local animator = hum:FindFirstChildOfClass("Animator")
+                    if animator then
+                        pcall(function()
+                            for _, a in ipairs(animator:GetPlayingAnimationTracks()) do
+                                a:Stop()
+                            end
+                        end)
+                    end
+                end
+            end
+        end
+        if saved.connections.npcNoAnim then saved.connections.npcNoAnim:Disconnect() end
+        saved.connections.npcNoAnim = RunService.Heartbeat:Connect(function()
+            if not state.npcNoAnim then return end
+            for _, plr in ipairs(Players:GetPlayers()) do
+                if plr ~= LocalPlayer and plr.Character then
+                    local hum = plr.Character:FindFirstChildOfClass("Humanoid")
+                    if hum then
+                        local animator = hum:FindFirstChildOfClass("Animator")
+                        if animator then
+                            pcall(function()
+                                for _, a in ipairs(animator:GetPlayingAnimationTracks()) do
+                                    a:Stop()
+                                end
+                            end)
+                        end
+                    end
+                end
+            end
+        end)
+    else
+        if saved.connections.npcNoAnim then
+            saved.connections.npcNoAnim:Disconnect()
+            saved.connections.npcNoAnim = nil
+        end
+    end
 end
 
 -- =====================================================
@@ -532,24 +700,19 @@ local function toggleSoundKill(on)
 end
 
 local function toggleMeshKill(on)
-    if on then
-        for _, v in ipairs(Workspace:GetDescendants()) do
-            pcall(function()
-                if v:IsA("MeshPart") and v.TextureID ~= "" then
-                    table.insert(saved.meshes, {obj=v, k="TextureID", o=v.TextureID}); v.TextureID = ""
-                end
-            end)
-        end
-    else
-        for _, m in ipairs(saved.meshes) do
-            pcall(function() if m.obj and m.obj.Parent then m.obj[m.k] = m.o end end)
-        end
-        saved.meshes = {}
+    if not on then return end
+    local char = LocalPlayer.Character
+    for _, v in ipairs(Workspace:GetDescendants()) do
+        pcall(function()
+            if v:IsA("MeshPart") and not (char and v:IsDescendantOf(char)) and not isProtected(v) then
+                v:Destroy()
+            end
+        end)
     end
 end
 
 -- =====================================================
--- NUCLEAR / ULTRA (ĐÃ LỌC AN TOÀN)
+-- NUCLEAR / ULTRA
 -- =====================================================
 local function toggleKillAllSound(on)
     if on then
@@ -601,43 +764,6 @@ local function toggleKillAllBeam(on)
             pcall(function() if b.obj and b.obj.Parent then b.obj.Enabled = b.e end end)
         end
         saved.allBeams = {}
-    end
-end
-
-local function toggleSmoothAll(on)
-    if on then
-        for _, v in ipairs(Workspace:GetDescendants()) do
-            pcall(function()
-                if v:IsA("BasePart") and v.Material ~= Enum.Material.SmoothPlastic then
-                    table.insert(saved.materials, {obj=v, m=v.Material})
-                    v.Material = Enum.Material.SmoothPlastic
-                end
-            end)
-        end
-    else
-        for _, m in ipairs(saved.materials) do
-            pcall(function() if m.obj and m.obj.Parent then m.obj.Material = m.m end end)
-        end
-        saved.materials = {}
-    end
-end
-
-local function toggleStripTextureAll(on)
-    if on then
-        for _, v in ipairs(Workspace:GetDescendants()) do
-            pcall(function()
-                if v:IsA("MeshPart") then
-                    table.insert(saved.allTextures, {obj=v, k="TextureID", o=v.TextureID}); v.TextureID = ""
-                elseif v:IsA("Decal") or v:IsA("Texture") then
-                    table.insert(saved.allTextures, {obj=v, k="Texture", o=v.Texture}); v.Texture = ""
-                end
-            end)
-        end
-    else
-        for _, t in ipairs(saved.allTextures) do
-            pcall(function() if t.obj and t.obj.Parent then t.obj[t.k] = t.o end end)
-        end
-        saved.allTextures = {}
     end
 end
 
@@ -745,27 +871,6 @@ local function toggleDestroyOthers(on)
     end
 end
 
-local function toggleDestroyNPCs(on)
-    if on then
-        local lc = LocalPlayer.Character
-        for _, v in ipairs(Workspace:GetDescendants()) do
-            pcall(function()
-                if v:IsA("Humanoid") and v.Parent ~= lc then
-                    local m = v.Parent
-                    if m and not m:IsDescendantOf(lc or game) and not isProtected(m) then
-                        table.insert(saved.humans, {obj=m, p=m.Parent}); m.Parent = nil
-                    end
-                end
-            end)
-        end
-    else
-        for _, h in ipairs(saved.humans) do
-            pcall(function() if h.obj then h.obj.Parent = h.p or Workspace end end)
-        end
-        saved.humans = {}
-    end
-end
-
 local function toggleKillWelds(on)
     if on then
         for _, v in ipairs(Workspace:GetDescendants()) do
@@ -842,19 +947,14 @@ local function toggleKillScripts(on)
 end
 
 local function toggleUnloadMeshes(on)
-    if on then
-        for _, v in ipairs(Workspace:GetDescendants()) do
-            pcall(function()
-                if v:IsA("MeshPart") and v.MeshId ~= "" then
-                    table.insert(saved.meshIds, {obj=v, k="MeshId", o=v.MeshId}); v.MeshId = ""
-                end
-            end)
-        end
-    else
-        for _, m in ipairs(saved.meshIds) do
-            pcall(function() if m.obj and m.obj.Parent then m.obj[m.k] = m.o end end)
-        end
-        saved.meshIds = {}
+    if not on then return end
+    local char = LocalPlayer.Character
+    for _, v in ipairs(Workspace:GetDescendants()) do
+        pcall(function()
+            if v:IsA("MeshPart") and not (char and v:IsDescendantOf(char)) and not isProtected(v) then
+                v:Destroy()
+            end
+        end)
     end
 end
 
@@ -933,10 +1033,8 @@ local function toggleKillSoundsSvc(on)
 end
 
 -- =====================================================
--- 🌪️ SAFE PURGE — XÓA NHƯNG AN TOÀN
+-- SAFE PURGE
 -- =====================================================
-
--- Chỉ xóa effects
 local function togglePurgeEffectsOnly(on)
     if not on then return end
     local char = LocalPlayer.Character
@@ -952,22 +1050,24 @@ local function togglePurgeEffectsOnly(on)
     end
 end
 
--- Xóa decal an toàn (không xóa ở part protected)
 local function togglePurgeDecalsSafe(on)
     if not on then return end
     local char = LocalPlayer.Character
     for _, v in ipairs(Workspace:GetDescendants()) do
         pcall(function()
             if (v:IsA("Decal") or v:IsA("Texture"))
-               and not (char and v:IsDescendantOf(char))
-               and not isProtected(v.Parent) then
-                v:Destroy()
+               and not (char and v:IsDescendantOf(char)) then
+                local par = v.Parent
+                if par and par:IsA("BasePart") and not isProtected(par) then
+                    par:Destroy()
+                else
+                    v:Destroy()
+                end
             end
         end)
     end
 end
 
--- Xóa part nhỏ (<0.5 stud) - không phá map
 local function togglePurgeSmallPartsSafe(on)
     if not on then return end
     local char = LocalPlayer.Character
@@ -981,7 +1081,6 @@ local function togglePurgeSmallPartsSafe(on)
     end
 end
 
--- Xóa theo tên mở rộng nhưng an toàn
 local function togglePurgeByMoreNamesSafe(on)
     if not on then return end
     local char = LocalPlayer.Character
@@ -1002,7 +1101,6 @@ local function togglePurgeByMoreNamesSafe(on)
     end
 end
 
--- Xóa Model chứa ParticleEmitter
 local function togglePurgeParticleModels(on)
     if not on then return end
     local char = LocalPlayer.Character
@@ -1012,7 +1110,7 @@ local function togglePurgeParticleModels(on)
             if (v:IsA("ParticleEmitter") or v:IsA("Fire") or v:IsA("Smoke") or v:IsA("Sparkles"))
                and not (char and v:IsDescendantOf(char)) then
                 local anc = v.Parent
-                if anc and anc:IsA("Model") and not isProtected(anc) then
+                if anc and anc:IsA("Model") and not isProtected(anc) and not isNPC(anc) then
                     table.insert(toDestroy, anc)
                 end
             end
@@ -1023,7 +1121,6 @@ local function togglePurgeParticleModels(on)
     end
 end
 
--- Xóa accessories toàn map
 local function togglePurgeAccessoriesGlobal(on)
     if not on then return end
     for _, v in ipairs(Workspace:GetDescendants()) do
@@ -1035,28 +1132,22 @@ local function togglePurgeAccessoriesGlobal(on)
     end
 end
 
--- Safe purge all (an toàn, không phá map)
 local function toggleSafePurgeAll(on)
     if not on then return end
     local char = LocalPlayer.Character
-    -- Chỉ xóa: effects, decal ở part không protected, part nhỏ
     for _, v in ipairs(Workspace:GetDescendants()) do
         pcall(function()
-            -- Effects
             if (v:IsA("ParticleEmitter") or v:IsA("Trail") or v:IsA("Beam")
                 or v:IsA("Fire") or v:IsA("Smoke") or v:IsA("Sparkles"))
                and not (char and v:IsDescendantOf(char)) then
                 v:Destroy()
             end
-            -- Explosion
             if v:IsA("Explosion") then v:Destroy() end
-            -- Decal/Texture ở part không protected
             if (v:IsA("Decal") or v:IsA("Texture"))
                and not (char and v:IsDescendantOf(char))
                and not isProtected(v.Parent) then
                 v:Destroy()
             end
-            -- Part siêu nhỏ
             if v:IsA("BasePart") and not (char and v:IsDescendantOf(char)) and not isProtected(v) then
                 local s = v.Size
                 if s.X < 0.5 and s.Y < 0.5 and s.Z < 0.5 then v:Destroy() end
@@ -1073,17 +1164,18 @@ local safeKeys = {
     "npcFreeze","gui3d","atmosphere","physics","skybox","terrain",
     "killLights","nametags","charSounds","forceShadow","removeEffects",
     "killFire","debrisClean","textureKill","soundKill","meshKill",
-    "killAllSound","killAllGui","killAllBeam","smoothAll","stripTextureAll",
+    "killAllSound","killAllGui","killAllBeam",
     "blockSpawn","killTools","stopAnims","killDecor2","aggressiveGC",
-    "ultraDestroy","destroyOthers","destroyNPCs",
+    "ultraDestroy","destroyOthers",
     "killWelds","killHumanoids","massDeleteName",
     "destroyAttachments","killScripts","unloadMeshes","killCoreGui",
     "renderDistZero","instantGC","killAnimator",
     "forceMinGraphics","deleteTools","killSoundsSvc",
-    -- SAFE PURGE
     "safePurge","purgeEffectsOnly","purgeDecalsSafe",
     "purgeSmallPartsSafe","purgeByMoreNamesSafe",
     "purgeParticleModels","purgeAccessoriesGlobal",
+    -- NPC (giữ NPC, chỉ đổi màu)
+    "npcGray","npcFlat","npcNoAnim",
 }
 
 local fnMap = {
@@ -1096,22 +1188,22 @@ local fnMap = {
     killFire=toggleAntiFire, debrisClean=toggleDebrisClean, textureKill=toggleTextureKill,
     soundKill=toggleSoundKill, meshKill=toggleMeshKill,
     killAllSound=toggleKillAllSound, killAllGui=toggleKillAllGui, killAllBeam=toggleKillAllBeam,
-    smoothAll=toggleSmoothAll, stripTextureAll=toggleStripTextureAll, blockSpawn=toggleBlockSpawn,
-    killTools=toggleKillTools, stopAnims=toggleStopAnims, killDecor2=toggleKillDecor2,
-    aggressiveGC=toggleAggressiveGC,
-    ultraDestroy=toggleUltraDestroy, destroyOthers=toggleDestroyOthers, destroyNPCs=toggleDestroyNPCs,
+    blockSpawn=toggleBlockSpawn, killTools=toggleKillTools, stopAnims=toggleStopAnims,
+    killDecor2=toggleKillDecor2, aggressiveGC=toggleAggressiveGC,
+    ultraDestroy=toggleUltraDestroy, destroyOthers=toggleDestroyOthers,
     killWelds=toggleKillWelds, killHumanoids=toggleKillHumanoids, massDeleteName=toggleMassDeleteName,
     destroyAttachments=toggleDestroyAttachments, killScripts=toggleKillScripts,
     unloadMeshes=toggleUnloadMeshes, killCoreGui=toggleKillCoreGui,
     renderDistZero=toggleRenderDistZero, instantGC=toggleInstantGC,
     killAnimator=toggleKillAnimator, forceMinGraphics=toggleForceMinGraphics,
     deleteTools=toggleDeleteTools, killSoundsSvc=toggleKillSoundsSvc,
-    -- SAFE PURGE
     safePurge=toggleSafePurgeAll, purgeEffectsOnly=togglePurgeEffectsOnly,
     purgeDecalsSafe=togglePurgeDecalsSafe, purgeSmallPartsSafe=togglePurgeSmallPartsSafe,
     purgeByMoreNamesSafe=togglePurgeByMoreNamesSafe,
     purgeParticleModels=togglePurgeParticleModels,
     purgeAccessoriesGlobal=togglePurgeAccessoriesGlobal,
+    -- NPC
+    npcGray=toggleNpcGray, npcFlat=toggleNpcFlat, npcNoAnim=toggleNpcNoAnim,
 }
 
 local function applyAll(on)
@@ -1177,7 +1269,7 @@ mStroke.Color = Color3.fromRGB(0, 255, 100); mStroke.Thickness = 2
 
 local title = Instance.new("TextLabel")
 title.Size = UDim2.new(1, -40, 0, 34); title.Position = UDim2.new(0, 10, 0, 3)
-title.BackgroundTransparency = 1; title.Text = "🛡️ FIXLAG_VN SAFE PURGE"
+title.BackgroundTransparency = 1; title.Text = "🎨 FIXLAG_VN GRAYSCALE"
 title.Font = Enum.Font.GothamBold; title.TextSize = 14
 title.TextColor3 = Color3.fromRGB(0, 255, 100)
 title.TextXAlignment = Enum.TextXAlignment.Left; title.Parent = menu
@@ -1236,7 +1328,12 @@ local function header(text, col)
     y = y + 26
 end
 
-header("🛡️ SAFE PURGE (AN TOÀN)", Color3.fromRGB(0, 255, 100))
+header("🎨 NPC (GIỮ LẠI - CHỈ ĐỔI MÀU)", Color3.fromRGB(200, 200, 200))
+add("🎨 NPC GRAYSCALE (trắng đen)", "npcGray",   toggleNpcGray,   Color3.fromRGB(60, 60, 60))
+add("🎨 NPC FLAT (bỏ phụ kiện)",    "npcFlat",   toggleNpcFlat,   Color3.fromRGB(60, 60, 60))
+add("🎨 NPC NO ANIM (đứng im)",     "npcNoAnim", toggleNpcNoAnim, Color3.fromRGB(60, 60, 60))
+
+header("🛡️ SAFE PURGE", Color3.fromRGB(0, 255, 100))
 add("🛡️ SAFE PURGE ALL",              "safePurge",              toggleSafePurgeAll,              Color3.fromRGB(0, 80, 30))
 add("🌪️ PURGE EFFECTS ONLY",          "purgeEffectsOnly",       togglePurgeEffectsOnly,          Color3.fromRGB(0, 80, 30))
 add("🌪️ PURGE DECALS (an toàn)",      "purgeDecalsSafe",        togglePurgeDecalsSafe,           Color3.fromRGB(0, 80, 30))
@@ -1245,10 +1342,9 @@ add("🌪️ PURGE BY MORE NAMES (safe)",  "purgeByMoreNamesSafe",   togglePurge
 add("🌪️ PURGE PARTICLE MODELS",       "purgeParticleModels",    togglePurgeParticleModels,       Color3.fromRGB(0, 80, 30))
 add("🌪️ PURGE ACCESSORIES GLOBAL",    "purgeAccessoriesGlobal", togglePurgeAccessoriesGlobal,    Color3.fromRGB(0, 80, 30))
 
-header("💀 ULTRA (an toàn)", Color3.fromRGB(255, 50, 50))
+header("💀 ULTRA", Color3.fromRGB(255, 50, 50))
 add("💀 ULTRA DESTROY effects", "ultraDestroy", toggleUltraDestroy, Color3.fromRGB(70, 10, 10))
 add("💀 DESTROY OTHERS (Parent=nil)", "destroyOthers", toggleDestroyOthers, Color3.fromRGB(70, 10, 10))
-add("💀 DESTROY NPCs",           "destroyNPCs",   toggleDestroyNPCs,   Color3.fromRGB(70, 10, 10))
 add("💀 KILL WELDS/MOTORS",      "killWelds",     toggleKillWelds,     Color3.fromRGB(70, 10, 10))
 add("💀 KILL HUMANOIDS XA",      "killHumanoids", toggleKillHumanoids, Color3.fromRGB(70, 10, 10))
 add("💀 MASS DELETE BY NAME",    "massDeleteName", toggleMassDeleteName, Color3.fromRGB(70, 10, 10))
@@ -1267,8 +1363,6 @@ header("☢️ NUCLEAR", Color3.fromRGB(255, 150, 80))
 add("☢️ KILL ALL SOUND", "killAllSound", toggleKillAllSound, Color3.fromRGB(80, 20, 20))
 add("☢️ KILL ALL GUI 3D", "killAllGui", toggleKillAllGui, Color3.fromRGB(80, 20, 20))
 add("☢️ KILL ALL BEAM",   "killAllBeam", toggleKillAllBeam, Color3.fromRGB(80, 20, 20))
-add("☢️ SMOOTH ALL",      "smoothAll",  toggleSmoothAll,  Color3.fromRGB(80, 20, 20))
-add("☢️ STRIP TEXTURE ALL", "stripTextureAll", toggleStripTextureAll, Color3.fromRGB(80, 20, 20))
 add("☢️ BLOCK SPAWN FX",  "blockSpawn", toggleBlockSpawn, Color3.fromRGB(80, 20, 20))
 add("☢️ KILL TOOLS",      "killTools",  toggleKillTools,  Color3.fromRGB(80, 20, 20))
 add("☢️ STOP ANIMATIONS", "stopAnims",  toggleStopAnims,  Color3.fromRGB(80, 20, 20))
@@ -1297,7 +1391,7 @@ add("⚫ Strip nhân vật", "stripChar", toggleStripChar)
 add("⚫ Xóa Skybox", "skybox", toggleSkybox)
 add("⚫ Xóa Terrain", "terrain", toggleTerrain)
 add("⚫ Kill Light", "killLights", toggleKillLights)
-add("⚫ TRẮNG ĐEN", "bwMode", toggleBW)
+add("⚫ TRẮNG ĐEN toàn màn hình", "bwMode", toggleBW)
 add("✦ Tắt Nametag", "nametags", toggleNametags)
 add("✦ Tắt âm thanh NV", "charSounds", toggleCharSounds)
 add("✦ Tắt Shadow", "forceShadow", toggleForceShadow)
@@ -1376,45 +1470,50 @@ end)
 
 y = y + 35
 
--- SAFE PURGE BUTTON
-local safeBtn = Instance.new("TextButton")
-safeBtn.Size = UDim2.new(1, -20, 0, 80); safeBtn.Position = UDim2.new(0, 10, 0, y)
-safeBtn.BackgroundColor3 = Color3.fromRGB(0, 120, 50)
-safeBtn.Text = "🛡️ SAFE PURGE ALL\n(XÓA AN TOÀN, GIỮ MAP)"
-safeBtn.Font = Enum.Font.GothamBold; safeBtn.TextSize = 14
-safeBtn.TextColor3 = Color3.fromRGB(255, 255, 255); safeBtn.Parent = scroll
-Instance.new("UICorner", safeBtn).CornerRadius = UDim.new(0, 10)
-local safeStroke = Instance.new("UIStroke", safeBtn)
-safeStroke.Color = Color3.fromRGB(0, 255, 100); safeStroke.Thickness = 3
+-- NPC GRAY BUTTON
+local grayBtn = Instance.new("TextButton")
+grayBtn.Size = UDim2.new(1, -20, 0, 80); grayBtn.Position = UDim2.new(0, 10, 0, y)
+grayBtn.BackgroundColor3 = Color3.fromRGB(80, 80, 80)
+grayBtn.Text = "🎨 NPC GRAYSCALE\n(GIỮ NPC, CHỈ TRẮNG ĐEN)"
+grayBtn.Font = Enum.Font.GothamBold; grayBtn.TextSize = 14
+grayBtn.TextColor3 = Color3.fromRGB(255, 255, 255); grayBtn.Parent = scroll
+Instance.new("UICorner", grayBtn).CornerRadius = UDim.new(0, 10)
+local grayStroke = Instance.new("UIStroke", grayBtn)
+grayStroke.Color = Color3.fromRGB(255, 255, 255); grayStroke.Thickness = 3
 
-safeBtn.MouseButton1Click:Connect(function()
-    state.safePurge = not state.safePurge
-    if state.safePurge then
-        -- Bật SAFE PURGE + tất cả PRO + effects
-        applyAll(true)
-        state.autoClean = true
-        autoBtn.BackgroundColor3 = Color3.fromRGB(30, 130, 70)
-        autoBtn.Text = "● AUTO CLEAN (0.5s)"
-        safeBtn.Text = "🛡️ SAFE PURGE ALL\n(ĐANG XÓA AN TOÀN...)"
-        safeBtn.BackgroundColor3 = Color3.fromRGB(0, 200, 100)
-        for k, data in pairs(buttons) do
-            if state[k] then
-                data.btn.BackgroundColor3 = Color3.fromRGB(30, 130, 70)
-                data.btn.TextColor3 = Color3.fromRGB(255, 255, 255)
-                data.btn.Text = "● " .. data.label
+grayBtn.MouseButton1Click:Connect(function()
+    state.npcGray = not state.npcGray
+    if state.npcGray then
+        pcall(toggleNpcGray, true)
+        pcall(toggleNpcFlat, true)
+        state.npcFlat = true
+        pcall(toggleNpcNoAnim, true)
+        state.npcNoAnim = true
+        grayBtn.Text = "🎨 NPC GRAYSCALE\n(ĐANG ÁP DỤNG...)"
+        grayBtn.BackgroundColor3 = Color3.fromRGB(150, 150, 150)
+        for _, k in ipairs({"npcGray","npcFlat","npcNoAnim"}) do
+            local d = buttons[k]
+            if d then
+                d.btn.BackgroundColor3 = Color3.fromRGB(30, 130, 70)
+                d.btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+                d.btn.Text = "● " .. d.label
             end
         end
     else
-        offAll()
-        state.autoClean = false
-        autoBtn.BackgroundColor3 = Color3.fromRGB(45, 45, 60)
-        autoBtn.Text = "○ AUTO CLEAN (0.5s)"
-        safeBtn.Text = "🛡️ SAFE PURGE ALL\n(XÓA AN TOÀN, GIỮ MAP)"
-        safeBtn.BackgroundColor3 = Color3.fromRGB(0, 120, 50)
-        for _, data in pairs(buttons) do
-            data.btn.BackgroundColor3 = data.color or Color3.fromRGB(45, 45, 60)
-            data.btn.TextColor3 = Color3.fromRGB(200, 200, 200)
-            data.btn.Text = "○ " .. data.label
+        pcall(toggleNpcGray, false)
+        pcall(toggleNpcFlat, false)
+        pcall(toggleNpcNoAnim, false)
+        state.npcFlat = false
+        state.npcNoAnim = false
+        grayBtn.Text = "🎨 NPC GRAYSCALE\n(GIỮ NPC, CHỈ TRẮNG ĐEN)"
+        grayBtn.BackgroundColor3 = Color3.fromRGB(80, 80, 80)
+        for _, k in ipairs({"npcGray","npcFlat","npcNoAnim"}) do
+            local d = buttons[k]
+            if d then
+                d.btn.BackgroundColor3 = d.color or Color3.fromRGB(45, 45, 60)
+                d.btn.TextColor3 = Color3.fromRGB(200, 200, 200)
+                d.btn.Text = "○ " .. d.label
+            end
         end
     end
 end)
@@ -1424,14 +1523,26 @@ y = y + 86
 local allBtn = Instance.new("TextButton")
 allBtn.Size = UDim2.new(1, -20, 0, 36); allBtn.Position = UDim2.new(0, 10, 0, y)
 allBtn.BackgroundColor3 = Color3.fromRGB(30, 120, 50)
-allBtn.Text = "🔥 BẬT TẤT CẢ"
+allBtn.Text = "🔥 BẬT TẤT CẢ (trừ NPC xóa)"
 allBtn.Font = Enum.Font.GothamBold; allBtn.TextSize = 11
 allBtn.TextColor3 = Color3.fromRGB(255, 255, 255); allBtn.Parent = scroll
 Instance.new("UICorner", allBtn).CornerRadius = UDim.new(0, 10)
 allBtn.MouseButton1Click:Connect(function()
-    applyAll(true); state.autoClean = true
+    -- Không bật destroyOthers/destroyNPCs
+    state.destroyOthers = false
+    applyAll(true)
+    state.destroyOthers = false  -- Đảm bảo không xóa player khác
+    state.autoClean = true
+    state.npcGray = true
+    pcall(toggleNpcGray, true)
+    pcall(toggleNpcFlat, true)
+    pcall(toggleNpcNoAnim, true)
+    state.npcFlat = true
+    state.npcNoAnim = true
     autoBtn.BackgroundColor3 = Color3.fromRGB(30, 130, 70)
     autoBtn.Text = "● AUTO CLEAN (0.5s)"
+    grayBtn.Text = "🎨 NPC GRAYSCALE\n(ĐANG ÁP DỤNG...)"
+    grayBtn.BackgroundColor3 = Color3.fromRGB(150, 150, 150)
     for k, data in pairs(buttons) do
         if state[k] then
             data.btn.BackgroundColor3 = Color3.fromRGB(30, 130, 70)
@@ -1451,11 +1562,15 @@ offAllBtn.Font = Enum.Font.GothamBold; offAllBtn.TextSize = 12
 offAllBtn.TextColor3 = Color3.fromRGB(255, 255, 255); offAllBtn.Parent = scroll
 Instance.new("UICorner", offAllBtn).CornerRadius = UDim.new(0, 10)
 offAllBtn.MouseButton1Click:Connect(function()
-    offAll(); state.autoClean = false; state.safePurge = false
+    offAll(); state.autoClean = false
+    state.npcGray = false; state.npcFlat = false; state.npcNoAnim = false
+    pcall(toggleNpcGray, false)
+    pcall(toggleNpcFlat, false)
+    pcall(toggleNpcNoAnim, false)
     autoBtn.BackgroundColor3 = Color3.fromRGB(45, 45, 60)
     autoBtn.Text = "○ AUTO CLEAN (0.5s)"
-    safeBtn.Text = "🛡️ SAFE PURGE ALL\n(XÓA AN TOÀN, GIỮ MAP)"
-    safeBtn.BackgroundColor3 = Color3.fromRGB(0, 120, 50)
+    grayBtn.Text = "🎨 NPC GRAYSCALE\n(GIỮ NPC, CHỈ TRẮNG ĐEN)"
+    grayBtn.BackgroundColor3 = Color3.fromRGB(80, 80, 80)
     for _, data in pairs(buttons) do
         data.btn.BackgroundColor3 = data.color or Color3.fromRGB(45, 45, 60)
         data.btn.TextColor3 = Color3.fromRGB(200, 200, 200)
@@ -1502,6 +1617,10 @@ spawn(function()
             end
             collectgarbage("collect")
         end
+        -- Áp dụng grayscale NPC liên tục
+        if state.npcGray then
+            pcall(toggleNpcGray, true)
+        end
     end
 end)
 
@@ -1510,6 +1629,7 @@ spawn(function()
         if state.killFire then pcall(toggleAntiFire, true) end
         if state.stopAnims then pcall(toggleStopAnims, true) end
         if state.killAnimator then pcall(toggleKillAnimator, true) end
+        if state.npcNoAnim then pcall(toggleNpcNoAnim, true) end
     end
 end)
 
@@ -1564,4 +1684,4 @@ LocalPlayer.CharacterAdded:Connect(function(char)
     end
 end)
 
-print("🛡️ FIXLAG_VN SAFE PURGE loaded! Bảo vệ baseplate/ground/spawn, không phá map.")
+print("🎨 FIXLAG_VN GRAYSCALE loaded! NPC giữ nguyên + chỉ trắng đen. FPS fix OK.")

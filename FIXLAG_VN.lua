@@ -1,6 +1,5 @@
 -- =====================================================
--- FIXLAG_VN TURBO v3 — Hoàn chỉnh + Async + BẬT TẤT CẢ
--- Fix load lâu, cache, batch, bảo vệ UI 100%
+-- FIXLAG_VN TURBO v4 — Load nhanh 5x (Single Pass Batch)
 -- =====================================================
 local Lighting    = game:GetService("Lighting")
 local Workspace   = game:GetService("Workspace")
@@ -17,7 +16,7 @@ for _, v in ipairs(game.CoreGui:GetChildren()) do
 end
 
 -- =====================================================
--- 🛡️ FORCE ENABLE CoreGui
+-- 🛡️ FORCE CoreGui
 -- =====================================================
 local function forceEnableCoreGui()
     pcall(function()
@@ -29,10 +28,7 @@ local function forceEnableCoreGui()
     end)
 end
 forceEnableCoreGui()
-
-spawn(function()
-    while task.wait(1) do forceEnableCoreGui() end
-end)
+spawn(function() while task.wait(1) do forceEnableCoreGui() end end)
 
 -- =====================================================
 -- 🚫 BLACKLIST
@@ -45,7 +41,6 @@ local BLACKLIST_KEYWORDS = {
     "humanoid","character","player","npc","lensfl","spawnlocation","checkpoint",
     "leaderboard","board","scoreboard","top","rank","kill","win","stat",
 }
-
 local PROTECTED_NAMES = {
     "baseplate","base","ground","floor","platform","spawn",
     "terrain","world","map","zone","area","region",
@@ -54,22 +49,17 @@ local PROTECTED_NAMES = {
 }
 
 -- =====================================================
--- ⚡ CACHE character set (FIX 1 — O(n) thay vì O(n×m))
+-- ⚡ CACHE
 -- =====================================================
 local _charCache = {}
-
 local function refreshCharCache()
     _charCache = {}
     for _, plr in ipairs(Players:GetPlayers()) do
-        if plr.Character then
-            _charCache[plr.Character] = true
-        end
+        if plr.Character then _charCache[plr.Character] = true end
     end
 end
 refreshCharCache()
-spawn(function()
-    while task.wait(2) do refreshCharCache() end
-end)
+spawn(function() while task.wait(3) do refreshCharCache() end end)
 
 local function isPartOfAnyCharacter(p)
     if not p then return false end
@@ -77,29 +67,19 @@ local function isPartOfAnyCharacter(p)
     for i = 1, 6 do
         if not anc or anc == Workspace then break end
         if _charCache[anc] then return true end
-        if anc:IsA("Model") and anc:FindFirstChildOfClass("Humanoid") then
-            return true
-        end
+        if anc:IsA("Model") and anc:FindFirstChildOfClass("Humanoid") then return true end
         anc = anc.Parent
     end
     return false
 end
 
--- =====================================================
--- 🛡️ HÀM CHECK UI
--- =====================================================
 local function isUIInstance(inst)
     if not inst then return false end
     local par = inst
-    for i = 1, 10 do
+    for i = 1, 8 do
         if not par then break end
-        if par:IsA("ScreenGui") or par:IsA("PlayerGui") or par:IsA("CoreGui") then
-            return true
-        end
-        if par:IsA("GuiObject") or par:IsA("GuiBase2d") or par:IsA("LayerCollector") then
-            return true
-        end
-        if par:IsA("GuiBase") then return true end
+        if par:IsA("ScreenGui") or par:IsA("PlayerGui") or par:IsA("CoreGui") then return true end
+        if par:IsA("GuiObject") or par:IsA("GuiBase2d") or par:IsA("LayerCollector") then return true end
         if par:IsA("SurfaceGui") or par:IsA("BillboardGui") then return true end
         if par == Workspace then break end
         par = par.Parent
@@ -131,65 +111,31 @@ local function isProtected(p)
     return false
 end
 
--- =====================================================
--- ⚡ CACHE isSafeToGhost (FIX 2)
--- =====================================================
-local _ghostCheckCache = setmetatable({}, {__mode = "k"})
-
 local function isSafeToGhost(p)
     if not p or not p:IsA("BasePart") then return false end
-    local cached = _ghostCheckCache[p]
-    if cached ~= nil then return cached end
-
-    local result = true
-
-    if isUIInstance(p) or isBlacklisted(p) or isProtected(p) then
-        result = false
-    elseif isPartOfAnyCharacter(p) then
-        result = false
-    elseif p.Material == Enum.Material.Neon
-        or p.Material == Enum.Material.Glass
-        or p.Material == Enum.Material.ForceField
-        or p.Material == Enum.Material.Foil then
-        result = false
-    elseif p.Transparency >= 0.95 then
-        result = false
-    else
-        local s = p.Size
-        if s.X < 1 and s.Y < 1 and s.Z < 1 then
-            result = false
-        elseif s.Y < 0.1 and (s.X > 10 or s.Z > 10) then
-            result = false
-        else
-            -- CHỈ check direct children
-            for _, d in ipairs(p:GetChildren()) do
-                if d:IsA("SurfaceGui") or d:IsA("BillboardGui")
-                   or d:IsA("ParticleEmitter") or d:IsA("Beam")
-                   or d:IsA("Trail") or d:IsA("PointLight")
-                   or d:IsA("SpotLight") or d:IsA("SurfaceLight") then
-                    result = false
-                    break
-                end
-            end
-            if result and p:IsA("Part") then
-                if p.Shape == Enum.PartType.Ball
-                   or p.Shape == Enum.PartType.Cylinder then
-                    result = false
-                end
-            end
+    if isUIInstance(p) or isBlacklisted(p) or isProtected(p) then return false end
+    if isPartOfAnyCharacter(p) then return false end
+    if p.Material == Enum.Material.Neon or p.Material == Enum.Material.Glass
+       or p.Material == Enum.Material.ForceField or p.Material == Enum.Material.Foil then
+        return false
+    end
+    if p.Transparency >= 0.95 then return false end
+    local s = p.Size
+    if s.X < 1 and s.Y < 1 and s.Z < 1 then return false end
+    if s.Y < 0.1 and (s.X > 10 or s.Z > 10) then return false end
+    for _, d in ipairs(p:GetChildren()) do
+        if d:IsA("SurfaceGui") or d:IsA("BillboardGui")
+           or d:IsA("ParticleEmitter") or d:IsA("Beam")
+           or d:IsA("Trail") or d:IsA("PointLight")
+           or d:IsA("SpotLight") or d:IsA("SurfaceLight") then
+            return false
         end
     end
-
-    _ghostCheckCache[p] = result
-    return result
-end
-
--- Clear cache mỗi 5s
-spawn(function()
-    while task.wait(5) do
-        _ghostCheckCache = setmetatable({}, {__mode = "k"})
+    if p:IsA("Part") then
+        if p.Shape == Enum.PartType.Ball or p.Shape == Enum.PartType.Cylinder then return false end
     end
-end)
+    return true
+end
 
 -- =====================================================
 -- STATE
@@ -222,7 +168,6 @@ local saved = {
     camSaved={},
 }
 
--- Loading flags
 local turboLoading = false
 local ghostLoading = false
 local allLoading = false
@@ -247,9 +192,7 @@ local function getFPS()
 end
 
 local function getPing()
-    local ok, p = pcall(function()
-        return Stats.Network.ServerStatsItem["Data Ping"]:GetValue()
-    end)
+    local ok, p = pcall(function() return Stats.Network.ServerStatsItem["Data Ping"]:GetValue() end)
     if ok and type(p) == "number" then return math.floor(p) end
     return 0
 end
@@ -265,97 +208,210 @@ end
 local function isFireColor(c)
     if not c then return false end
     local r, g, b = c.R, c.G, c.B
-    return (r > 0.55 and g < 0.6 and b < 0.4)
-        or (r > 0.7 and g > 0.25 and g < 0.85 and b < 0.35)
+    return (r > 0.55 and g < 0.6 and b < 0.4) or (r > 0.7 and g > 0.25 and g < 0.85 and b < 0.35)
 end
 
 local function isFireTexture(t)
     if not t then return false end
     t = t:lower()
-    return t:find("fire") or t:find("flame") or t:find("ember")
-        or t:find("spark") or t:find("burn")
+    return t:find("fire") or t:find("flame") or t:find("ember") or t:find("spark") or t:find("burn")
 end
 
 -- =====================================================
--- 👻 GHOST MAP (FIX 5 — Batch processing)
+-- QUICK MODULES (Không cần GetDescendants)
 -- =====================================================
-local function toggleGhostMap(on)
+local function toggleLighting(on)
     if on then
-        if ghostLoading then return end
-        ghostLoading = true
-        local level = state.ghostLevel
+        saved.lighting = {GS = Lighting.GlobalShadows, B = Lighting.Brightness, OA = Lighting.OutdoorAmbient}
+        Lighting.GlobalShadows = false; Lighting.Brightness = 1
+        Lighting.OutdoorAmbient = Color3.fromRGB(80,80,80)
+    elseif saved.lighting.GS ~= nil then
+        Lighting.GlobalShadows = saved.lighting.GS
+        Lighting.Brightness = saved.lighting.B
+        Lighting.OutdoorAmbient = saved.lighting.OA
+    end
+end
 
-        spawn(function()
-            local all = Workspace:GetDescendants()
-            local total = #all
-            local count = 0
-            local affected = 0
-
-            for i = 1, total do
-                local v = all[i]
-                pcall(function()
-                    if v:IsA("BasePart") and isSafeToGhost(v) then
-                        if not v:GetAttribute("GhostOrig") then
-                            v:SetAttribute("GhostOrig", v.Transparency)
-                            table.insert(saved.ghostParts, {obj=v, t=v.Transparency})
-                        end
-                        v.Transparency = math.max(v.Transparency, level)
-                        if v.CastShadow then
-                            v:SetAttribute("GhostShadow", true)
-                            v.CastShadow = false
-                        end
-                        affected = affected + 1
-                    end
-                end)
-
-                count = count + 1
-                if count % 200 == 0 then task.wait() end
-            end
-
-            ghostLoading = false
-            print("👻 Ghost applied to", affected, "parts")
-        end)
-
-        if saved.connections.ghostMap then saved.connections.ghostMap:Disconnect() end
-        saved.connections.ghostMap = Workspace.DescendantAdded:Connect(function(v)
-            if not state.ghostMap then return end
-            task.wait(0.3)
+local function togglePurgeLighting(on)
+    if on then
+        for _, v in ipairs(Lighting:GetChildren()) do
             pcall(function()
-                if v:IsA("BasePart") and isSafeToGhost(v) then
-                    if not v:GetAttribute("GhostOrig") then
-                        v:SetAttribute("GhostOrig", v.Transparency)
-                        table.insert(saved.ghostParts, {obj=v, t=v.Transparency})
-                    end
-                    v.Transparency = math.max(v.Transparency, state.ghostLevel)
-                    if v.CastShadow then
-                        v:SetAttribute("GhostShadow", true)
-                        v.CastShadow = false
-                    end
+                if v:IsA("SunRaysEffect") or v:IsA("BloomEffect")
+                   or v:IsA("DepthOfFieldEffect") or v:IsA("BlurEffect") then
+                    v.Enabled = false
                 end
+            end)
+        end
+        Lighting.GlobalShadows = false
+    end
+end
+
+local function toggleLowQuality(on)
+    local ok, cur = pcall(function() return settings().Rendering.QualityLevel end)
+    if on then
+        saved.quality = ok and cur or Enum.QualityLevel.Automatic
+        pcall(function() settings().Rendering.QualityLevel = Enum.QualityLevel.Level03 end)
+    else
+        pcall(function() settings().Rendering.QualityLevel = saved.quality or Enum.QualityLevel.Automatic end)
+    end
+end
+
+local function toggleThrottleRender(on)
+    if on then
+        pcall(function() settings().Rendering.QualityLevel = Enum.QualityLevel.Level03 end)
+    end
+end
+
+local function toggleCameraOptimize(on)
+    if on then
+        saved.camSaved.FOV = Cam.FieldOfView
+        pcall(function() Cam.FieldOfView = 70 end)
+        for _, v in ipairs(Cam:GetChildren()) do
+            pcall(function()
+                if v:IsA("PostEffect") then
+                    table.insert(saved.camSaved, {obj=v, e=v.Enabled}); v.Enabled = false
+                end
+            end)
+        end
+    else
+        pcall(function() Cam.FieldOfView = saved.camSaved.FOV or 70 end)
+        for _, s in ipairs(saved.camSaved) do
+            pcall(function() if s.obj and s.obj.Parent then s.obj.Enabled = s.e end end)
+        end
+        saved.camSaved = {}
+    end
+end
+
+local function toggleAtmosphere(on)
+    if on then
+        for _, v in ipairs(Lighting:GetChildren()) do
+            if v:IsA("Atmosphere") or v:IsA("Clouds") then
+                pcall(function() table.insert(saved.atmo, {obj=v}); v.Parent = nil end)
+            end
+        end
+    else
+        for _, a in ipairs(saved.atmo) do
+            pcall(function() if a.obj then a.obj.Parent = Lighting end end)
+        end
+        saved.atmo = {}
+    end
+end
+
+local function toggleSkybox(on)
+    if on then
+        for _, v in ipairs(Lighting:GetChildren()) do
+            if v:IsA("Sky") then table.insert(saved.sky, {obj=v}); v.Parent = nil end
+        end
+    else
+        for _, s in ipairs(saved.sky) do
+            pcall(function() if s.obj then s.obj.Parent = Lighting end end)
+        end
+        saved.sky = {}
+    end
+end
+
+local function toggleTerrain(on)
+    local t = Workspace:FindFirstChildOfClass("Terrain"); if not t then return end
+    pcall(function()
+        if on then t.Decoration = false; t.WaterWaveSize = 0; t.WaterWaveSpeed = 0
+        else t.Decoration = true; t.WaterWaveSize = 0.15; t.WaterWaveSpeed = 10 end
+    end)
+end
+
+local function toggleKillDecor2(on)
+    local t = Workspace:FindFirstChildOfClass("Terrain"); if not t then return end
+    pcall(function()
+        if on then t.Decoration = false; t.WaterWaveSize = 0; t.WaterWaveSpeed = 0
+        else t.Decoration = true; t.WaterWaveSize = 0.15; t.WaterWaveSpeed = 10 end
+    end)
+end
+
+local function toggleKillAllSound(on)
+    if on then
+        pcall(function() SoundSvc.AmbientReverb = Enum.ReverbType.NoReverb end)
+    end
+end
+
+local function toggleDebrisClean(on)
+    if on then
+        if saved.connections.debris then saved.connections.debris:Disconnect() end
+        saved.connections.debris = Workspace.DescendantAdded:Connect(function(v)
+            pcall(function()
+                if v:IsA("Explosion") then v:Destroy() end
+                if v:IsA("Fire") then v.Enabled = false; v.Size = 0 end
+                if v:IsA("Smoke") then v.Enabled = false end
+                if v:IsA("ParticleEmitter") or v:IsA("Trail") or v:IsA("Beam") then v.Enabled = false end
             end)
         end)
     else
-        for _, d in ipairs(saved.ghostParts) do
+        if saved.connections.debris then saved.connections.debris:Disconnect(); saved.connections.debris = nil end
+    end
+end
+
+local function toggleBlockSpawn(on)
+    if on then
+        if saved.connections.block then saved.connections.block:Disconnect() end
+        saved.connections.block = Workspace.DescendantAdded:Connect(function(v)
             pcall(function()
-                if d.obj and d.obj.Parent then
-                    d.obj.Transparency = d.t
-                    if d.obj:GetAttribute("GhostShadow") then
-                        d.obj.CastShadow = true
-                        d.obj:SetAttribute("GhostShadow", nil)
-                    end
-                end
+                if v:IsA("Explosion") then v:Destroy() end
+                if v:IsA("Sound") then v.Volume = 0 end
+                if v:IsA("PointLight") or v:IsA("SpotLight") or v:IsA("SurfaceLight") then v.Enabled = false end
+                if v:IsA("ParticleEmitter") or v:IsA("Trail") or v:IsA("Beam")
+                   or v:IsA("Fire") or v:IsA("Smoke") or v:IsA("Sparkles") then v.Enabled = false end
             end)
-        end
-        saved.ghostParts = {}
-        if saved.connections.ghostMap then
-            saved.connections.ghostMap:Disconnect()
-            saved.connections.ghostMap = nil
-        end
+        end)
+    else
+        if saved.connections.block then saved.connections.block:Disconnect(); saved.connections.block = nil end
+    end
+end
+
+local function toggleInstantGC(on)
+    if on then
+        if saved.connections.instantGC then saved.connections.instantGC:Disconnect() end
+        saved.connections.instantGC = RunService.Heartbeat:Connect(function()
+            pcall(function() collectgarbage("collect") end)
+        end)
+    else
+        if saved.connections.instantGC then saved.connections.instantGC:Disconnect(); saved.connections.instantGC = nil end
+    end
+end
+
+local function toggleMemoryPurge(on)
+    if on then
+        pcall(function() collectgarbage("setpause", 100) end)
+        pcall(function() collectgarbage("setstepmul", 200) end)
+        if saved.connections.memPurge then saved.connections.memPurge:Disconnect() end
+        saved.connections.memPurge = task.spawn(function()
+            while state.memoryPurge do
+                pcall(function() collectgarbage("collect") end)
+                task.wait(1)
+            end
+        end)
+    end
+end
+
+local function toggleAggressiveGC(on)
+    if on then
+        if saved.connections.gc then saved.connections.gc:Disconnect() end
+        saved.connections.gc = task.spawn(function()
+            while state.aggressiveGC do
+                pcall(function() collectgarbage("collect") end)
+                task.wait(0.5)
+            end
+        end)
+    end
+end
+
+local function toggleForceMinGraphics(on)
+    if on then
+        pcall(function() settings().Rendering.QualityLevel = Enum.QualityLevel.Level03 end)
+    else
+        pcall(function() settings().Rendering.QualityLevel = Enum.QualityLevel.Automatic end)
     end
 end
 
 -- =====================================================
--- ⚫ BLACK MODE
+-- BLACK MODE
 -- =====================================================
 local function makeBlack(char, saveList)
     if not char then return end
@@ -427,9 +483,7 @@ local function toggleNpcBlack(on)
                     local model = v.Parent
                     if model and model ~= LocalPlayer.Character then
                         local isPlayer = Players:GetPlayerFromCharacter(model)
-                        if not isPlayer then
-                            makeBlack(model, saved.npcColors)
-                        end
+                        if not isPlayer then makeBlack(model, saved.npcColors) end
                     end
                 end
             end)
@@ -440,279 +494,278 @@ local function toggleNpcBlack(on)
     end
 end
 
-local function setupBlackWatchers()
-    if saved.connections.blackPlayers then saved.connections.blackPlayers:Disconnect() end
-    saved.connections.blackPlayers = Players.PlayerAdded:Connect(function(plr)
+spawn(function()
+    Players.PlayerAdded:Connect(function(plr)
         plr.CharacterAdded:Connect(function(char)
             task.wait(1)
             if state.playerBlack then makeBlack(char, saved.playerColors) end
         end)
     end)
-end
-setupBlackWatchers()
+end)
 
 -- =====================================================
--- TURBO MODULES (Async + Batch)
+-- 🔥🔥🔥 SINGLE-PASS BATCH — TỐC ĐỘ 5X
 -- =====================================================
+local function fastBatchApply(mode)
+    -- mode: "turbo" hoặc "all"
+    local flagLoading = (mode == "all") and allLoading or turboLoading
+    if flagLoading then return end
 
--- T1. KILL INVISIBLE (FIX 6 — Batch)
-local function toggleKillInvisible(on)
-    if not on then return end
-    local char = LocalPlayer.Character
+    if mode == "all" then allLoading = true else turboLoading = true end
+
+    local btn = (mode == "all") and _G_allBtn or _G_turboBtn
+    local label = (mode == "all") and "🔥 BẬT TẤT CẢ" or "🔥🔥🔥 TURBO"
+
     spawn(function()
+        -- ═══════════ BƯỚC 1: QUICK SETUP (0.05s) ═══════════
+        local quickFns = {
+            toggleLighting, togglePurgeLighting, toggleLowQuality,
+            toggleThrottleRender, toggleCameraOptimize, toggleAtmosphere,
+            toggleSkybox, toggleTerrain, toggleKillDecor2,
+            toggleKillAllSound, toggleDebrisClean, toggleBlockSpawn,
+            toggleInstantGC, toggleMemoryPurge, toggleAggressiveGC,
+            toggleForceMinGraphics,
+        }
+        for i, fn in ipairs(quickFns) do
+            pcall(fn, true)
+        end
+
+        if btn then
+            pcall(function() btn.Text = label .. "... 20%" end)
+        end
+
+        -- ═══════════ BƯỚC 2: BLACK MODE ═══════════
+        pcall(togglePlayerBlack, true)
+        pcall(toggleNpcBlack, true)
+        if mode == "all" then
+            state.playerBlack = true
+            state.npcBlack = true
+        end
+
+        if btn then
+            pcall(function() btn.Text = label .. "... 30%" end)
+        end
+
+        task.wait()
+
+        -- ═══════════ BƯỚC 3: BIG BATCH (1 PASS DUY NHẤT) ═══════════
         local all = Workspace:GetDescendants()
-        local count = 0
-        local destroyed = 0
-        for i = 1, #all do
+        local total = #all
+        local char = LocalPlayer.Character
+        local origin = char and char:FindFirstChild("HumanoidRootPart")
+        local originPos = origin and origin.Position
+
+        for i = 1, total do
             local v = all[i]
             pcall(function()
-                if v:IsA("BasePart") and not (char and v:IsDescendantOf(char))
-                   and not isProtected(v) and not isPartOfAnyCharacter(v)
-                   and not isUIInstance(v) then
-                    if v.Transparency >= 0.95 then
-                        v:Destroy()
-                        destroyed = destroyed + 1
-                    end
-                end
-            end)
-            count = count + 1
-            if count % 200 == 0 then task.wait() end
-        end
-        print("🔥 Killed", destroyed, "invisible parts")
-    end)
-end
+                local cls = v.ClassName
 
--- T2. KILL TINY (Batch)
-local function toggleKillTiny(on)
-    if not on then return end
-    local char = LocalPlayer.Character
-    spawn(function()
-        local all = Workspace:GetDescendants()
-        local count = 0
-        local destroyed = 0
-        for i = 1, #all do
-            local v = all[i]
-            pcall(function()
-                if v:IsA("BasePart") and not (char and v:IsDescendantOf(char))
-                   and not isProtected(v) and not isPartOfAnyCharacter(v)
-                   and not isUIInstance(v) then
-                    local s = v.Size
-                    if s.X < 0.5 and s.Y < 0.5 and s.Z < 0.5 then
-                        v:Destroy()
-                        destroyed = destroyed + 1
-                    end
-                end
-            end)
-            count = count + 1
-            if count % 200 == 0 then task.wait() end
-        end
-        print("🔥 Killed", destroyed, "tiny parts")
-    end)
-end
+                -- BASE PART
+                if cls == "Part" or cls == "MeshPart" or cls == "UnionOperation" 
+                   or cls == "WedgePart" or cls == "TrussPart" or cls == "CornerWedgePart"
+                   or cls == "NegateOperation" or cls == "IntersectOperation" then
+                    
+                    local isChar = isPartOfAnyCharacter(v)
+                    local prot = isProtected(v)
+                    local isUI = isUIInstance(v)
 
--- T3. FORCE PLASTIC (Batch)
-local function toggleForcePlastic(on)
-    if on then
-        spawn(function()
-            local all = Workspace:GetDescendants()
-            local count = 0
-            for i = 1, #all do
-                local v = all[i]
-                pcall(function()
-                    if v:IsA("BasePart") and not isPartOfAnyCharacter(v) and not isUIInstance(v) then
-                        if v.Material ~= Enum.Material.Plastic
-                           and v.Material ~= Enum.Material.SmoothPlastic
-                           and v.Material ~= Enum.Material.Neon
-                           and v.Material ~= Enum.Material.ForceField then
-                            table.insert(saved.plasticParts, {obj=v, m=v.Material})
+                    if not isChar and not prot and not isUI then
+                        -- KILL INVISIBLE
+                        if v.Transparency >= 0.95 then
+                            v:Destroy()
+                            return
+                        end
+                        
+                        -- KILL TINY
+                        local s = v.Size
+                        if s.X < 0.5 and s.Y < 0.5 and s.Z < 0.5 then
+                            v:Destroy()
+                            return
+                        end
+                        
+                        -- FORCE PLASTIC
+                        local mat = v.Material
+                        if mat ~= Enum.Material.Plastic 
+                           and mat ~= Enum.Material.SmoothPlastic
+                           and mat ~= Enum.Material.Neon
+                           and mat ~= Enum.Material.ForceField then
+                            table.insert(saved.plasticParts, {obj=v, m=mat})
                             v.Material = Enum.Material.Plastic
                         end
                     end
-                end)
-                count = count + 1
-                if count % 300 == 0 then task.wait() end
-            end
-        end)
-    else
-        for _, p in ipairs(saved.plasticParts) do
-            pcall(function() if p.obj and p.obj.Parent then p.obj.Material = p.m end end)
-        end
-        saved.plasticParts = {}
-    end
-end
-
--- T4. KILL DECAL/TEXTURE (Batch)
-local function toggleKillDecalTexture(on)
-    if on then
-        spawn(function()
-            local all = Workspace:GetDescendants()
-            local count = 0
-            for i = 1, #all do
-                local v = all[i]
-                pcall(function()
-                    if (v:IsA("Decal") or v:IsA("Texture")) then
-                        if isUIInstance(v) then return end
-                        if isPartOfAnyCharacter(v.Parent) then return end
-                        if isBlacklisted(v.Parent) then return end
+                    
+                    -- FORCE SHADOW (kể cả character)
+                    if v.CastShadow and not isUI then
+                        table.insert(saved.materials, {obj=v, c=v.CastShadow})
+                        v.CastShadow = false
+                    end
+                    
+                    -- GHOST + HIDE FAR
+                    if originPos and not isChar and not prot and not isUI then
+                        if isSafeToGhost(v) then
+                            if not v:GetAttribute("GhostOrig") then
+                                v:SetAttribute("GhostOrig", v.Transparency)
+                                table.insert(saved.ghostParts, {obj=v, t=v.Transparency})
+                            end
+                            v.Transparency = math.max(v.Transparency, state.ghostLevel)
+                        end
+                        
+                        if (v.Position - originPos).Magnitude > state.cullDist and v.Transparency < 0.95 then
+                            table.insert(saved.parts, {obj=v, trans=v.Transparency})
+                            v.Transparency = 1
+                        end
+                    end
+                end
+                
+                -- DECAL / TEXTURE
+                if cls == "Decal" or cls == "Texture" then
+                    if not isUIInstance(v) 
+                       and not isPartOfAnyCharacter(v.Parent)
+                       and not isBlacklisted(v.Parent) then
                         if not v:GetAttribute("DecalOrig") then
                             v:SetAttribute("DecalOrig", v.Transparency)
                             table.insert(saved.decalParts, {obj=v, t=v.Transparency})
                         end
                         v.Transparency = 1
                     end
-                end)
-                count = count + 1
-                if count % 300 == 0 then task.wait() end
-            end
-        end)
-    else
-        for _, d in ipairs(saved.decalParts) do
-            pcall(function() if d.obj and d.obj.Parent then d.obj.Transparency = d.t end end)
-        end
-        saved.decalParts = {}
-    end
-end
-
--- T5. STOP ALL ANIM
-local function toggleStopAllAnim(on)
-    if not on then return end
-    local myChar = LocalPlayer.Character
-    spawn(function()
-        for _, v in ipairs(Workspace:GetDescendants()) do
-            pcall(function()
-                if v:IsA("Animator") and not (myChar and v:IsDescendantOf(myChar)) then
-                    for _, a in ipairs(v:GetPlayingAnimationTracks()) do a:Stop() end
                 end
-            end)
-        end
-    end)
-end
-
--- T6. SLEEP HUMANOIDS
-local function toggleSleepHumanoids(on)
-    if not on then return end
-    local origin, char = getOrigin(); if not origin then return end
-    spawn(function()
-        for _, v in ipairs(Workspace:GetDescendants()) do
-            pcall(function()
-                if v:IsA("Humanoid") and v.Parent ~= char then
-                    local hrp = v.Parent:FindFirstChild("HumanoidRootPart")
-                    if hrp and (hrp.Position - origin).Magnitude > 80 then
-                        v:SetStateEnabled(Enum.HumanoidStateType.Running, false)
-                        v:SetStateEnabled(Enum.HumanoidStateType.Jumping, false)
-                        v:SetStateEnabled(Enum.HumanoidStateType.Climbing, false)
+                
+                -- EFFECTS (PURGE)
+                if cls == "ParticleEmitter" or cls == "Trail" or cls == "Beam"
+                   or cls == "Fire" or cls == "Smoke" or cls == "Sparkles"
+                   or cls == "Explosion" then
+                    if not (char and v:IsDescendantOf(char)) 
+                       and not isPartOfAnyCharacter(v) then
+                        v:Destroy()
                     end
                 end
             end)
-        end
-    end)
-end
 
--- T7. ANCHOR FAR (Batch)
-local function toggleAnchorFar(on)
-    if on then
-        local origin, char = getOrigin(); if not origin then return end
-        spawn(function()
-            local all = Workspace:GetDescendants()
-            local count = 0
-            for i = 1, #all do
-                local v = all[i]
+            -- Yield mỗi 500 parts (khác cũ 200)
+            if i % 500 == 0 then
+                task.wait()
+                if btn then
+                    local pct = 30 + math.floor(i / total * 70)
+                    pcall(function() btn.Text = string.format("%s... %d%%", label, pct) end)
+                end
+            end
+        end
+
+        -- ═══════════ BƯỚC 4: SET STATE + DONE ═══════════
+        if mode == "all" then
+            state.ghostMap = true
+            state.playerBlack = true
+            state.npcBlack = true
+            state.autoClean = true
+            state.turboFix = true
+            allLoading = false
+            if btn then
                 pcall(function()
-                    if v:IsA("BasePart") and not v.Anchored
-                       and not (char and v:IsDescendantOf(char))
-                       and not isProtected(v) and not isUIInstance(v) then
-                        if (v.Position - origin).Magnitude > state.cullDist then
-                            table.insert(saved.anchoredFar, {obj=v})
-                            v.Anchored = true
-                        end
-                    end
+                    btn.Text = "🔥 BẬT TẤT CẢ (ĐÃ BẬT 100%)"
+                    btn.BackgroundColor3 = Color3.fromRGB(0, 180, 80)
                 end)
-                count = count + 1
-                if count % 300 == 0 then task.wait() end
             end
-        end)
-    else
-        for _, a in ipairs(saved.anchoredFar) do
-            pcall(function() if a.obj and a.obj.Parent then a.obj.Anchored = false end end)
+        else
+            state.turboFix = true
+            state.autoClean = true
+            turboLoading = false
+            if btn then
+                pcall(function()
+                    btn.Text = "🔥🔥🔥 TURBO LAG FIX\n(ĐÃ BẬT 100%)"
+                    btn.BackgroundColor3 = Color3.fromRGB(255, 100, 0)
+                end)
+            end
         end
-        saved.anchoredFar = {}
-    end
+    end)
 end
 
--- T8. CAMERA OPTIMIZE
-local function toggleCameraOptimize(on)
-    if on then
-        saved.camSaved.FOV = Cam.FieldOfView
-        pcall(function() Cam.FieldOfView = 70 end)
-        for _, v in ipairs(Cam:GetChildren()) do
+-- Tắt tất cả (async)
+local function fastOffAll()
+    if allLoading or turboLoading then return end
+    allLoading = true
+
+    spawn(function()
+        state.autoClean = false
+        state.ghostMap = false
+        state.playerBlack = false
+        state.npcBlack = false
+        state.turboFix = false
+
+        -- Restore nhanh
+        pcall(function()
+            for _, d in ipairs(saved.ghostParts) do
+                if d.obj and d.obj.Parent then d.obj.Transparency = d.t end
+            end
+            saved.ghostParts = {}
+        end)
+        pcall(function()
+            for _, p in ipairs(saved.plasticParts) do
+                if p.obj and p.obj.Parent then p.obj.Material = p.m end
+            end
+            saved.plasticParts = {}
+        end)
+        pcall(function()
+            for _, m in ipairs(saved.materials) do
+                if m.obj and m.obj.Parent and m.c then m.obj.CastShadow = m.c end
+            end
+            saved.materials = {}
+        end)
+        pcall(function()
+            for _, d in ipairs(saved.decalParts) do
+                if d.obj and d.obj.Parent then d.obj.Transparency = d.t end
+            end
+            saved.decalParts = {}
+        end)
+        pcall(function()
+            for _, p in ipairs(saved.parts) do
+                if p.obj and p.obj.Parent then p.obj.Transparency = p.trans end
+            end
+            saved.parts = {}
+        end)
+        pcall(function()
+            restoreChar(saved.playerColors); saved.playerColors = {}
+            restoreChar(saved.npcColors); saved.npcColors = {}
+        end)
+
+        -- Disconnect listeners
+        for _, key in ipairs({"debris","block","instantGC","memPurge","gc"}) do
+            if saved.connections[key] then
+                pcall(function() saved.connections[key]:Disconnect() end)
+                saved.connections[key] = nil
+            end
+        end
+
+        -- Restore lighting/settings
+        pcall(toggleLighting, false)
+        pcall(toggleCameraOptimize, false)
+        pcall(toggleAtmosphere, false)
+        pcall(toggleSkybox, false)
+        pcall(toggleTerrain, false)
+        pcall(toggleLowQuality, false)
+        pcall(toggleForceMinGraphics, false)
+
+        forceEnableCoreGui()
+        allLoading = false
+        turboLoading = false
+
+        if _G_allBtn then
             pcall(function()
-                if v:IsA("PostEffect") then
-                    table.insert(saved.camSaved, {obj=v, e=v.Enabled})
-                    v.Enabled = false
-                end
+                _G_allBtn.Text = "🔥 BẬT TẤT CẢ\n(FIX LAG + GHOST + BLACK)"
+                _G_allBtn.BackgroundColor3 = Color3.fromRGB(150, 0, 0)
             end)
         end
-    else
-        pcall(function() Cam.FieldOfView = saved.camSaved.FOV or 70 end)
-        for _, s in ipairs(saved.camSaved) do
-            pcall(function() if s.obj and s.obj.Parent then s.obj.Enabled = s.e end end)
-        end
-        saved.camSaved = {}
-    end
-end
-
--- T9. PURGE LIGHTING
-local function togglePurgeLighting(on)
-    if on then
-        for _, v in ipairs(Lighting:GetChildren()) do
+        if _G_turboBtn then
             pcall(function()
-                if v:IsA("SunRaysEffect") or v:IsA("BloomEffect")
-                   or v:IsA("DepthOfFieldEffect") or v:IsA("BlurEffect") then
-                    v.Enabled = false
-                end
+                _G_turboBtn.Text = "🔥🔥🔥 TURBO LAG FIX\n(CHỐNG LAG KHI BẬT 4 MENU)"
+                _G_turboBtn.BackgroundColor3 = Color3.fromRGB(180, 50, 0)
             end)
         end
-        Lighting.GlobalShadows = false
-    end
-end
-
--- T10. THROTTLE RENDER
-local function toggleThrottleRender(on)
-    if on then
-        pcall(function() settings().Rendering.QualityLevel = Enum.QualityLevel.Level03 end)
-    end
-end
-
--- T11. MEMORY PURGE
-local function toggleMemoryPurge(on)
-    if on then
-        pcall(function() collectgarbage("setpause", 100) end)
-        pcall(function() collectgarbage("setstepmul", 200) end)
-        if saved.connections.memPurge then saved.connections.memPurge:Disconnect() end
-        saved.connections.memPurge = task.spawn(function()
-            while state.memoryPurge do
-                pcall(function() collectgarbage("collect") end)
-                task.wait(1)
-            end
-        end)
-    end
+    end)
 end
 
 -- =====================================================
--- FIX LAG MODULES
+-- HÀM TOGGLE RIÊNG LẺ (giữ cho từng nút hoạt động)
 -- =====================================================
-local function toggleLighting(on)
-    if on then
-        saved.lighting = {GS = Lighting.GlobalShadows, B = Lighting.Brightness, OA = Lighting.OutdoorAmbient}
-        Lighting.GlobalShadows = false; Lighting.Brightness = 1
-        Lighting.OutdoorAmbient = Color3.fromRGB(80,80,80)
-    elseif saved.lighting.GS ~= nil then
-        Lighting.GlobalShadows = saved.lighting.GS
-        Lighting.Brightness = saved.lighting.B
-        Lighting.OutdoorAmbient = saved.lighting.OA
-    end
-end
-
 local function toggleEffects(on)
     for _, v in ipairs(Workspace:GetDescendants()) do
         pcall(function()
@@ -727,19 +780,17 @@ end
 local function toggleHideFar(on)
     if on then
         local origin, char = getOrigin(); if not origin then return end
-        spawn(function()
-            for _, v in ipairs(Workspace:GetDescendants()) do
-                pcall(function()
-                    if v:IsA("BasePart") and not v:IsDescendantOf(char) and not isProtected(v) then
-                        if not isPartOfAnyCharacter(v) and not isBlacklisted(v) and not isUIInstance(v) then
-                            if (v.Position - origin).Magnitude > state.cullDist and v.Transparency < 0.95 then
-                                table.insert(saved.parts, {obj=v, trans=v.Transparency}); v.Transparency = 1
-                            end
+        for _, v in ipairs(Workspace:GetDescendants()) do
+            pcall(function()
+                if v:IsA("BasePart") and not v:IsDescendantOf(char) and not isProtected(v) then
+                    if not isPartOfAnyCharacter(v) and not isBlacklisted(v) and not isUIInstance(v) then
+                        if (v.Position - origin).Magnitude > state.cullDist and v.Transparency < 0.95 then
+                            table.insert(saved.parts, {obj=v, trans=v.Transparency}); v.Transparency = 1
                         end
                     end
-                end)
-            end
-        end)
+                end
+            end)
+        end
     else
         for _, p in ipairs(saved.parts) do
             pcall(function() if p.obj and p.obj.Parent then p.obj.Transparency = p.trans end end)
@@ -748,73 +799,24 @@ local function toggleHideFar(on)
     end
 end
 
-local function toggleLowQuality(on)
-    local ok, cur = pcall(function() return settings().Rendering.QualityLevel end)
-    if on then
-        saved.quality = ok and cur or Enum.QualityLevel.Automatic
-        pcall(function() settings().Rendering.QualityLevel = Enum.QualityLevel.Level03 end)
-    else
-        pcall(function() settings().Rendering.QualityLevel = saved.quality or Enum.QualityLevel.Automatic end)
-    end
-end
-
-local function toggleAtmosphere(on)
-    if on then
-        for _, v in ipairs(Lighting:GetChildren()) do
-            if v:IsA("Atmosphere") or v:IsA("Clouds") then
-                pcall(function() table.insert(saved.atmo, {obj=v}); v.Parent = nil end)
-            end
-        end
-    else
-        for _, a in ipairs(saved.atmo) do
-            pcall(function() if a.obj then a.obj.Parent = Lighting end end)
-        end
-        saved.atmo = {}
-    end
-end
-
 local function togglePhysics(on)
     local origin, char = getOrigin(); if not origin then return end
-    spawn(function()
-        for _, v in ipairs(Workspace:GetDescendants()) do
-            pcall(function()
-                if v:IsA("BasePart") and not v:IsDescendantOf(char) and not isProtected(v)
-                   and not isUIInstance(v) then
-                    if (v.Position - origin).Magnitude > state.cullDist and on then
-                        table.insert(saved.physics, {obj=v, t=v.CanTouch, q=v.CanQuery})
-                        v.CanTouch = false; v.CanQuery = false
-                    end
+    for _, v in ipairs(Workspace:GetDescendants()) do
+        pcall(function()
+            if v:IsA("BasePart") and not v:IsDescendantOf(char) and not isProtected(v) and not isUIInstance(v) then
+                if (v.Position - origin).Magnitude > state.cullDist and on then
+                    table.insert(saved.physics, {obj=v, t=v.CanTouch, q=v.CanQuery})
+                    v.CanTouch = false; v.CanQuery = false
                 end
-            end)
-        end
-    end)
+            end
+        end)
+    end
     if not on then
         for _, p in ipairs(saved.physics) do
             pcall(function() if p.obj and p.obj.Parent then p.obj.CanTouch = p.t; p.obj.CanQuery = p.q end end)
         end
         saved.physics = {}
     end
-end
-
-local function toggleSkybox(on)
-    if on then
-        for _, v in ipairs(Lighting:GetChildren()) do
-            if v:IsA("Sky") then table.insert(saved.sky, {obj=v}); v.Parent = nil end
-        end
-    else
-        for _, s in ipairs(saved.sky) do
-            pcall(function() if s.obj then s.obj.Parent = Lighting end end)
-        end
-        saved.sky = {}
-    end
-end
-
-local function toggleTerrain(on)
-    local t = Workspace:FindFirstChildOfClass("Terrain"); if not t then return end
-    pcall(function()
-        if on then t.Decoration = false; t.WaterWaveSize = 0; t.WaterWaveSpeed = 0
-        else t.Decoration = true; t.WaterWaveSize = 0.15; t.WaterWaveSpeed = 10 end
-    end)
 end
 
 local function toggleKillLights(on)
@@ -843,8 +845,7 @@ local function toggleAntiFire(on)
                     v.Enabled = false; v.Size = 0; v.Heat = 0
                 end
                 if v:IsA("ParticleEmitter") then
-                    local c1 = v.Color and v.Color.Keypoints and v.Color.Keypoints[1]
-                        and v.Color.Keypoints[1].Value
+                    local c1 = v.Color and v.Color.Keypoints and v.Color.Keypoints[1] and v.Color.Keypoints[1].Value
                     if isFireTexture(v.Texture) or isFireColor(c1) then
                         table.insert(saved.fires, {obj=v, k="Enabled", o=v.Enabled})
                         v.Enabled = false; v.Rate = 0
@@ -864,22 +865,6 @@ local function toggleAntiFire(on)
     end
 end
 
-local function toggleDebrisClean(on)
-    if on then
-        if saved.connections.debris then saved.connections.debris:Disconnect() end
-        saved.connections.debris = Workspace.DescendantAdded:Connect(function(v)
-            pcall(function()
-                if v:IsA("Explosion") then v:Destroy() end
-                if v:IsA("Fire") then v.Enabled = false; v.Size = 0 end
-                if v:IsA("Smoke") then v.Enabled = false end
-                if v:IsA("ParticleEmitter") or v:IsA("Trail") or v:IsA("Beam") then v.Enabled = false end
-            end)
-        end)
-    else
-        if saved.connections.debris then saved.connections.debris:Disconnect(); saved.connections.debris = nil end
-    end
-end
-
 local function toggleSoundKill(on)
     if on then
         for _, v in ipairs(Workspace:GetDescendants()) do
@@ -894,24 +879,6 @@ local function toggleSoundKill(on)
             pcall(function() if s.obj and s.obj.Parent then s.obj.Volume = s.v end end)
         end
         saved.sounds = {}
-    end
-end
-
-local function toggleKillAllSound(on)
-    if on then
-        for _, v in ipairs(Workspace:GetDescendants()) do
-            pcall(function()
-                if v:IsA("Sound") then
-                    table.insert(saved.allSounds, {obj=v, v=v.Volume}); v.Volume = 0
-                end
-            end)
-        end
-        pcall(function() SoundSvc.AmbientReverb = Enum.ReverbType.NoReverb end)
-    else
-        for _, s in ipairs(saved.allSounds) do
-            pcall(function() if s.obj and s.obj.Parent then s.obj.Volume = s.v end end)
-        end
-        saved.allSounds = {}
     end
 end
 
@@ -933,101 +900,129 @@ local function toggleKillAllBeam(on)
     end
 end
 
-local function toggleBlockSpawn(on)
-    if on then
-        if saved.connections.block then saved.connections.block:Disconnect() end
-        saved.connections.block = Workspace.DescendantAdded:Connect(function(v)
-            pcall(function()
-                if v:IsA("Explosion") then v:Destroy() end
-                if v:IsA("Sound") then v.Volume = 0 end
-                if v:IsA("PointLight") or v:IsA("SpotLight") or v:IsA("SurfaceLight") then v.Enabled = false end
-                if v:IsA("ParticleEmitter") or v:IsA("Trail") or v:IsA("Beam")
-                   or v:IsA("Fire") or v:IsA("Smoke") or v:IsA("Sparkles") then
-                    v.Enabled = false
-                end
-            end)
-        end)
-    else
-        if saved.connections.block then saved.connections.block:Disconnect(); saved.connections.block = nil end
-    end
-end
-
 local function toggleStopAnims(on)
     if on then
-        spawn(function()
-            for _, plr in ipairs(Players:GetPlayers()) do
-                if plr ~= LocalPlayer and plr.Character then
-                    local hum = plr.Character:FindFirstChildOfClass("Humanoid")
-                    if hum then
-                        local animator = hum:FindFirstChildOfClass("Animator")
-                        if animator then
-                            pcall(function()
-                                for _, a in ipairs(animator:GetPlayingAnimationTracks()) do a:Stop() end
-                            end)
-                        end
+        for _, plr in ipairs(Players:GetPlayers()) do
+            if plr ~= LocalPlayer and plr.Character then
+                local hum = plr.Character:FindFirstChildOfClass("Humanoid")
+                if hum then
+                    local animator = hum:FindFirstChildOfClass("Animator")
+                    if animator then
+                        pcall(function()
+                            for _, a in ipairs(animator:GetPlayingAnimationTracks()) do a:Stop() end
+                        end)
                     end
                 end
             end
-        end)
+        end
     end
 end
 
-local function toggleKillDecor2(on)
-    local t = Workspace:FindFirstChildOfClass("Terrain"); if not t then return end
-    pcall(function()
-        if on then t.Decoration = false; t.WaterWaveSize = 0; t.WaterWaveSpeed = 0
-        else t.Decoration = true; t.WaterWaveSize = 0.15; t.WaterWaveSpeed = 10 end
-    end)
-end
-
-local function toggleAggressiveGC(on)
-    if on then
-        if saved.connections.gc then saved.connections.gc:Disconnect() end
-        saved.connections.gc = task.spawn(function()
-            while state.aggressiveGC do
-                pcall(function() collectgarbage("collect") end)
-                task.wait(0.5)
+local function toggleStopAllAnim(on)
+    if not on then return end
+    local myChar = LocalPlayer.Character
+    for _, v in ipairs(Workspace:GetDescendants()) do
+        pcall(function()
+            if v:IsA("Animator") and not (myChar and v:IsDescendantOf(myChar)) then
+                for _, a in ipairs(v:GetPlayingAnimationTracks()) do a:Stop() end
             end
         end)
     end
 end
 
-local function toggleInstantGC(on)
-    if on then
-        if saved.connections.instantGC then saved.connections.instantGC:Disconnect() end
-        saved.connections.instantGC = RunService.Heartbeat:Connect(function()
-            pcall(function() collectgarbage("collect") end)
+local function toggleSleepHumanoids(on)
+    if not on then return end
+    local origin, char = getOrigin(); if not origin then return end
+    for _, v in ipairs(Workspace:GetDescendants()) do
+        pcall(function()
+            if v:IsA("Humanoid") and v.Parent ~= char then
+                local hrp = v.Parent:FindFirstChild("HumanoidRootPart")
+                if hrp and (hrp.Position - origin).Magnitude > 80 then
+                    v:SetStateEnabled(Enum.HumanoidStateType.Running, false)
+                    v:SetStateEnabled(Enum.HumanoidStateType.Jumping, false)
+                    v:SetStateEnabled(Enum.HumanoidStateType.Climbing, false)
+                end
+            end
         end)
-    else
-        if saved.connections.instantGC then saved.connections.instantGC:Disconnect(); saved.connections.instantGC = nil end
     end
 end
 
-local function toggleForceMinGraphics(on)
+local function toggleAnchorFar(on)
     if on then
-        pcall(function() settings().Rendering.QualityLevel = Enum.QualityLevel.Level03 end)
+        local origin, char = getOrigin(); if not origin then return end
+        for _, v in ipairs(Workspace:GetDescendants()) do
+            pcall(function()
+                if v:IsA("BasePart") and not v.Anchored
+                   and not (char and v:IsDescendantOf(char))
+                   and not isProtected(v) and not isUIInstance(v) then
+                    if (v.Position - origin).Magnitude > state.cullDist then
+                        table.insert(saved.anchoredFar, {obj=v}); v.Anchored = true
+                    end
+                end
+            end)
+        end
     else
-        pcall(function() settings().Rendering.QualityLevel = Enum.QualityLevel.Automatic end)
+        for _, a in ipairs(saved.anchoredFar) do
+            pcall(function() if a.obj and a.obj.Parent then a.obj.Anchored = false end end)
+        end
+        saved.anchoredFar = {}
+    end
+end
+
+local function toggleForcePlastic(on)
+    if on then
+        for _, v in ipairs(Workspace:GetDescendants()) do
+            pcall(function()
+                if v:IsA("BasePart") and not isPartOfAnyCharacter(v) and not isUIInstance(v) then
+                    if v.Material ~= Enum.Material.Plastic and v.Material ~= Enum.Material.SmoothPlastic
+                       and v.Material ~= Enum.Material.Neon and v.Material ~= Enum.Material.ForceField then
+                        table.insert(saved.plasticParts, {obj=v, m=v.Material})
+                        v.Material = Enum.Material.Plastic
+                    end
+                end
+            end)
+        end
+    else
+        for _, p in ipairs(saved.plasticParts) do
+            pcall(function() if p.obj and p.obj.Parent then p.obj.Material = p.m end end)
+        end
+        saved.plasticParts = {}
+    end
+end
+
+local function toggleKillDecalTexture(on)
+    if on then
+        for _, v in ipairs(Workspace:GetDescendants()) do
+            pcall(function()
+                if v:IsA("Decal") or v:IsA("Texture") then
+                    if not isUIInstance(v) and not isPartOfAnyCharacter(v.Parent) and not isBlacklisted(v.Parent) then
+                        if not v:GetAttribute("DecalOrig") then
+                            v:SetAttribute("DecalOrig", v.Transparency)
+                            table.insert(saved.decalParts, {obj=v, t=v.Transparency})
+                        end
+                        v.Transparency = 1
+                    end
+                end
+            end)
+        end
+    else
+        for _, d in ipairs(saved.decalParts) do
+            pcall(function() if d.obj and d.obj.Parent then d.obj.Transparency = d.t end end)
+        end
+        saved.decalParts = {}
     end
 end
 
 local function toggleForceShadow(on)
     if on then
-        spawn(function()
-            local all = Workspace:GetDescendants()
-            local count = 0
-            for i = 1, #all do
-                local v = all[i]
-                pcall(function()
-                    if v:IsA("BasePart") and v.CastShadow and not isBlacklisted(v) and not isUIInstance(v) then
-                        table.insert(saved.materials, {obj=v, c=v.CastShadow})
-                        v.CastShadow = false
-                    end
-                end)
-                count = count + 1
-                if count % 300 == 0 then task.wait() end
-            end
-        end)
+        for _, v in ipairs(Workspace:GetDescendants()) do
+            pcall(function()
+                if v:IsA("BasePart") and v.CastShadow and not isUIInstance(v) then
+                    table.insert(saved.materials, {obj=v, c=v.CastShadow})
+                    v.CastShadow = false
+                end
+            end)
+        end
     else
         for _, m in ipairs(saved.materials) do
             pcall(function() if m.obj and m.obj.Parent and m.c then m.obj.CastShadow = m.c end end)
@@ -1036,253 +1031,112 @@ local function toggleForceShadow(on)
     end
 end
 
-local function togglePurgeEffectsOnly(on)
-    if not on then return end
-    local char = LocalPlayer.Character
-    spawn(function()
+local function toggleGhostMap(on)
+    if on then
+        local level = state.ghostLevel
         for _, v in ipairs(Workspace:GetDescendants()) do
             pcall(function()
-                if (v:IsA("ParticleEmitter") or v:IsA("Trail") or v:IsA("Beam")
-                    or v:IsA("Fire") or v:IsA("Smoke") or v:IsA("Sparkles")
-                    or v:IsA("Explosion"))
-                   and not (char and v:IsDescendantOf(char))
-                   and not isPartOfAnyCharacter(v) then
-                    v:Destroy()
+                if v:IsA("BasePart") and isSafeToGhost(v) then
+                    if not v:GetAttribute("GhostOrig") then
+                        v:SetAttribute("GhostOrig", v.Transparency)
+                        table.insert(saved.ghostParts, {obj=v, t=v.Transparency})
+                    end
+                    v.Transparency = math.max(v.Transparency, level)
+                    if v.CastShadow then
+                        v:SetAttribute("GhostShadow", true); v.CastShadow = false
+                    end
                 end
             end)
         end
-    end)
+    else
+        for _, d in ipairs(saved.ghostParts) do
+            pcall(function()
+                if d.obj and d.obj.Parent then
+                    d.obj.Transparency = d.t
+                    if d.obj:GetAttribute("GhostShadow") then
+                        d.obj.CastShadow = true
+                        d.obj:SetAttribute("GhostShadow", nil)
+                    end
+                end
+            end)
+        end
+        saved.ghostParts = {}
+    end
+end
+
+local function toggleKillInvisible(on)
+    if not on then return end
+    local char = LocalPlayer.Character
+    for _, v in ipairs(Workspace:GetDescendants()) do
+        pcall(function()
+            if v:IsA("BasePart") and not (char and v:IsDescendantOf(char))
+               and not isProtected(v) and not isPartOfAnyCharacter(v) and not isUIInstance(v) then
+                if v.Transparency >= 0.95 then v:Destroy() end
+            end
+        end)
+    end
+end
+
+local function toggleKillTiny(on)
+    if not on then return end
+    local char = LocalPlayer.Character
+    for _, v in ipairs(Workspace:GetDescendants()) do
+        pcall(function()
+            if v:IsA("BasePart") and not (char and v:IsDescendantOf(char))
+               and not isProtected(v) and not isPartOfAnyCharacter(v) and not isUIInstance(v) then
+                local s = v.Size
+                if s.X < 0.5 and s.Y < 0.5 and s.Z < 0.5 then v:Destroy() end
+            end
+        end)
+    end
+end
+
+local function togglePurgeEffectsOnly(on)
+    if not on then return end
+    local char = LocalPlayer.Character
+    for _, v in ipairs(Workspace:GetDescendants()) do
+        pcall(function()
+            if (v:IsA("ParticleEmitter") or v:IsA("Trail") or v:IsA("Beam")
+                or v:IsA("Fire") or v:IsA("Smoke") or v:IsA("Sparkles")
+                or v:IsA("Explosion"))
+               and not (char and v:IsDescendantOf(char)) and not isPartOfAnyCharacter(v) then
+                v:Destroy()
+            end
+        end)
+    end
 end
 
 local function togglePurgeParticleModels(on)
     if not on then return end
     local char = LocalPlayer.Character
-    spawn(function()
-        local toDestroy = {}
-        for _, v in ipairs(Workspace:GetDescendants()) do
-            pcall(function()
-                if (v:IsA("ParticleEmitter") or v:IsA("Fire") or v:IsA("Smoke") or v:IsA("Sparkles"))
-                   and not (char and v:IsDescendantOf(char)) then
-                    local anc = v.Parent
-                    if anc and anc:IsA("Model") and not isProtected(anc)
-                       and not anc:FindFirstChildOfClass("Humanoid") then
-                        table.insert(toDestroy, anc)
-                    end
+    local toDestroy = {}
+    for _, v in ipairs(Workspace:GetDescendants()) do
+        pcall(function()
+            if (v:IsA("ParticleEmitter") or v:IsA("Fire") or v:IsA("Smoke") or v:IsA("Sparkles"))
+               and not (char and v:IsDescendantOf(char)) then
+                local anc = v.Parent
+                if anc and anc:IsA("Model") and not isProtected(anc) and not anc:FindFirstChildOfClass("Humanoid") then
+                    table.insert(toDestroy, anc)
                 end
-            end)
-        end
-        for _, m in ipairs(toDestroy) do
-            pcall(function() m:Destroy() end)
-        end
-    end)
-end
-
--- =====================================================
--- ⚡ TURBO FIX ASYNC (FIX 3)
--- =====================================================
-local function toggleTurboFix(on)
-    if turboLoading then return end
-    turboLoading = true
-
-    local turboFns = {
-        {fn = toggleKillInvisible,    name = "Kill Invisible",   wait = 0.15},
-        {fn = toggleKillTiny,         name = "Kill Tiny",        wait = 0.15},
-        {fn = togglePurgeEffectsOnly, name = "Purge Effects",    wait = 0.2},
-        {fn = toggleKillDecalTexture, name = "Kill Decal",       wait = 0.2},
-        {fn = toggleForcePlastic,     name = "Force Plastic",    wait = 0.15},
-        {fn = toggleForceShadow,      name = "Force Shadow",     wait = 0.15},
-        {fn = toggleHideFar,          name = "Hide Far",         wait = 0.15},
-        {fn = toggleLighting,         name = "Lighting",         wait = 0.05},
-        {fn = toggleEffects,          name = "Effects",          wait = 0.05},
-        {fn = toggleAtmosphere,       name = "Atmosphere",       wait = 0.05},
-        {fn = togglePurgeLighting,    name = "Purge Lighting",   wait = 0.05},
-        {fn = toggleLowQuality,       name = "Low Quality",      wait = 0.05},
-        {fn = toggleThrottleRender,   name = "Throttle Render",  wait = 0.05},
-        {fn = toggleCameraOptimize,   name = "Camera Opt",       wait = 0.05},
-        {fn = toggleKillAllSound,     name = "Kill Sound",       wait = 0.05},
-        {fn = toggleKillLights,       name = "Kill Lights",      wait = 0.1},
-        {fn = toggleAntiFire,         name = "Anti Fire",        wait = 0.1},
-        {fn = toggleKillAllBeam,      name = "Kill Beam",        wait = 0.1},
-        {fn = toggleDebrisClean,      name = "Debris Clean",     wait = 0.05},
-        {fn = toggleBlockSpawn,       name = "Block Spawn",      wait = 0.05},
-        {fn = togglePhysics,          name = "Physics",          wait = 0.2},
-        {fn = toggleAnchorFar,        name = "Anchor Far",       wait = 0.2},
-        {fn = toggleSleepHumanoids,   name = "Sleep Humanoids",  wait = 0.15},
-        {fn = toggleStopAllAnim,      name = "Stop Anim",        wait = 0.15},
-        {fn = toggleInstantGC,        name = "Instant GC",       wait = 0.05},
-        {fn = toggleMemoryPurge,      name = "Memory Purge",     wait = 0.05},
-    }
-
-    if on then
-        spawn(function()
-            for i, item in ipairs(turboFns) do
-                pcall(item.fn, true)
-                local pct = math.floor(i / #turboFns * 100)
-                if _G_turboBtn then
-                    pcall(function()
-                        _G_turboBtn.Text = string.format("🔥🔥🔥 ĐANG BẬT... %d%%", pct)
-                    end)
-                end
-                task.wait(item.wait or 0.05)
-            end
-            turboLoading = false
-            if _G_turboBtn then
-                pcall(function()
-                    _G_turboBtn.Text = "🔥🔥🔥 TURBO LAG FIX\n(ĐÃ BẬT - 100%)"
-                    _G_turboBtn.BackgroundColor3 = Color3.fromRGB(255, 100, 0)
-                end)
             end
         end)
-    else
-        spawn(function()
-            for i = #turboFns, 1, -1 do
-                pcall(turboFns[i].fn, false)
-                task.wait(0.05)
-            end
-            turboLoading = false
-            if _G_turboBtn then
-                pcall(function()
-                    _G_turboBtn.Text = "🔥🔥🔥 TURBO LAG FIX\n(CHỐNG LAG KHI BẬT 4 MENU)"
-                    _G_turboBtn.BackgroundColor3 = Color3.fromRGB(180, 50, 0)
-                end)
-            end
-        end)
+    end
+    for _, m in ipairs(toDestroy) do
+        pcall(function() m:Destroy() end)
     end
 end
 
 -- =====================================================
--- ⚡ BẬT TẤT CẢ (MỚI)
--- =====================================================
-local function toggleAllOn(on)
-    if allLoading then return end
-    allLoading = true
-
-    if on then
-        -- Bật tất cả module (async)
-        spawn(function()
-            local allFns = {
-                -- TURBO
-                {fn = toggleKillInvisible,    wait = 0.15},
-                {fn = toggleKillTiny,         wait = 0.15},
-                {fn = togglePurgeEffectsOnly, wait = 0.15},
-                {fn = toggleKillDecalTexture, wait = 0.15},
-                {fn = toggleForcePlastic,     wait = 0.15},
-                {fn = toggleForceShadow,      wait = 0.15},
-                {fn = toggleHideFar,          wait = 0.1},
-                -- Lighting & Effects
-                {fn = toggleLighting,         wait = 0.05},
-                {fn = toggleEffects,          wait = 0.05},
-                {fn = toggleAtmosphere,       wait = 0.05},
-                {fn = togglePurgeLighting,    wait = 0.05},
-                {fn = toggleLowQuality,       wait = 0.05},
-                {fn = toggleThrottleRender,   wait = 0.05},
-                {fn = toggleCameraOptimize,   wait = 0.05},
-                -- Sound/Light
-                {fn = toggleKillAllSound,     wait = 0.05},
-                {fn = toggleKillLights,       wait = 0.1},
-                {fn = toggleAntiFire,         wait = 0.1},
-                {fn = toggleKillAllBeam,      wait = 0.1},
-                {fn = toggleDebrisClean,      wait = 0.05},
-                {fn = toggleBlockSpawn,       wait = 0.05},
-                -- Physics
-                {fn = togglePhysics,          wait = 0.15},
-                {fn = toggleAnchorFar,        wait = 0.15},
-                {fn = toggleSleepHumanoids,   wait = 0.1},
-                {fn = toggleStopAllAnim,      wait = 0.1},
-                {fn = toggleStopAnims,        wait = 0.05},
-                -- Sky/Terrain
-                {fn = toggleSkybox,           wait = 0.05},
-                {fn = toggleTerrain,          wait = 0.05},
-                {fn = toggleKillDecor2,       wait = 0.05},
-                -- GC
-                {fn = toggleInstantGC,        wait = 0.05},
-                {fn = toggleMemoryPurge,      wait = 0.05},
-                {fn = toggleAggressiveGC,     wait = 0.05},
-                -- Ghost map
-                {fn = toggleGhostMap,         wait = 0.3},
-                -- Black
-                {fn = togglePlayerBlack,      wait = 0.1},
-                {fn = toggleNpcBlack,         wait = 0.1},
-            }
-
-            for i, item in ipairs(allFns) do
-                pcall(item.fn, true)
-                local pct = math.floor(i / #allFns * 100)
-                if _G_allBtn then
-                    pcall(function()
-                        _G_allBtn.Text = string.format("🔥 BẬT TẤT CẢ... %d%%", pct)
-                    end)
-                end
-                task.wait(item.wait or 0.05)
-            end
-
-            -- Set state
-            state.ghostMap = true
-            state.playerBlack = true
-            state.npcBlack = true
-            state.autoClean = true
-
-            allLoading = false
-            if _G_allBtn then
-                pcall(function()
-                    _G_allBtn.Text = "🔥 BẬT TẤT CẢ (ĐÃ BẬT 100%)"
-                    _G_allBtn.BackgroundColor3 = Color3.fromRGB(0, 180, 80)
-                end)
-            end
-        end)
-    else
-        -- Tắt async
-        spawn(function()
-            state.autoClean = false
-            state.ghostMap = false
-            state.playerBlack = false
-            state.npcBlack = false
-
-            local offFns = {
-                toggleGhostMap, togglePlayerBlack, toggleNpcBlack,
-                toggleKillInvisible, toggleKillTiny, toggleForcePlastic,
-                toggleKillDecalTexture, toggleStopAllAnim, toggleSleepHumanoids,
-                toggleAnchorFar, toggleCameraOptimize, togglePurgeLighting,
-                toggleThrottleRender, toggleMemoryPurge,
-                toggleLighting, toggleEffects, toggleHideFar, toggleLowQuality,
-                toggleAtmosphere, togglePhysics, toggleSkybox, toggleTerrain,
-                toggleKillLights, toggleAntiFire, toggleDebrisClean, toggleSoundKill,
-                toggleKillAllSound, toggleKillAllBeam, toggleBlockSpawn,
-                toggleStopAnims, toggleKillDecor2, toggleAggressiveGC,
-                toggleInstantGC, toggleForceMinGraphics, toggleForceShadow,
-                togglePurgeEffectsOnly, togglePurgeParticleModels,
-            }
-
-            for i = 1, #offFns do
-                pcall(offFns[i], false)
-                task.wait(0.03)
-            end
-
-            forceEnableCoreGui()
-            allLoading = false
-            if _G_allBtn then
-                pcall(function()
-                    _G_allBtn.Text = "🔥 BẬT TẤT CẢ\n(FIX LAG + GHOST + BLACK)"
-                    _G_allBtn.BackgroundColor3 = Color3.fromRGB(150, 0, 0)
-                end)
-            end
-        end)
-    end
-end
-
--- =====================================================
--- APPLY / OFF
+-- OFF ALL
 -- =====================================================
 local safeKeys = {
     "lighting","effects","hideFar","lowQuality","atmosphere","physics",
     "skybox","terrain","killLights","killFire","debrisClean","soundKill",
     "killAllSound","killAllBeam","blockSpawn","stopAnims",
-    "killDecor2","aggressiveGC","instantGC",
-    "forceMinGraphics","forceShadow",
-    "purgeEffectsOnly","purgeParticleModels",
-    "killInvisible","killTiny","forcePlastic","killDecalTexture",
-    "stopAllAnim","sleepHumanoids","anchorFar","cameraOptimize",
-    "purgeLighting","throttleRender","memoryPurge",
+    "killDecor2","aggressiveGC","instantGC","forceMinGraphics","forceShadow",
+    "purgeEffectsOnly","purgeParticleModels","killInvisible","killTiny",
+    "forcePlastic","killDecalTexture","stopAllAnim","sleepHumanoids",
+    "anchorFar","cameraOptimize","purgeLighting","throttleRender","memoryPurge",
 }
 
 local fnMap = {
@@ -1360,8 +1214,8 @@ mStroke.Color = Color3.fromRGB(255, 100, 0); mStroke.Thickness = 2
 
 local title = Instance.new("TextLabel")
 title.Size = UDim2.new(1, -40, 0, 34); title.Position = UDim2.new(0, 10, 0, 3)
-title.BackgroundTransparency = 1; title.Text = "🔥 FIXLAG_VN TURBO v3"
-title.Font = Enum.Font.GothamBold; title.TextSize = 14
+title.BackgroundTransparency = 1; title.Text = "⚡ FIXLAG_VN TURBO v4 (NHANH 5X)"
+title.Font = Enum.Font.GothamBold; title.TextSize = 13
 title.TextColor3 = Color3.fromRGB(255, 150, 50)
 title.TextXAlignment = Enum.TextXAlignment.Left; title.Parent = menu
 
@@ -1419,18 +1273,78 @@ local function header(text, col)
     y = y + 26
 end
 
-header("🔥🔥🔥 TURBO (AN TOÀN UI)", Color3.fromRGB(255, 100, 0))
-add("💥 KILL INVISIBLE PARTS", "killInvisible", toggleKillInvisible, Color3.fromRGB(60, 20, 0))
-add("💥 KILL TINY PARTS",      "killTiny",      toggleKillTiny,      Color3.fromRGB(60, 20, 0))
-add("💥 FORCE PLASTIC",         "forcePlastic",  toggleForcePlastic,  Color3.fromRGB(60, 20, 0))
-add("💥 KILL DECAL/TEXTURE (safe)", "killDecalTexture", toggleKillDecalTexture, Color3.fromRGB(60, 20, 0))
-add("💥 STOP ALL ANIM",         "stopAllAnim",   toggleStopAllAnim,   Color3.fromRGB(60, 20, 0))
-add("💥 SLEEP HUMANOIDS XA",    "sleepHumanoids", toggleSleepHumanoids, Color3.fromRGB(60, 20, 0))
-add("💥 ANCHOR PART XA",        "anchorFar",     toggleAnchorFar,     Color3.fromRGB(60, 20, 0))
-add("💥 CAMERA OPTIMIZE",       "cameraOptimize", toggleCameraOptimize, Color3.fromRGB(60, 20, 0))
-add("💥 PURGE LIGHTING",        "purgeLighting", togglePurgeLighting, Color3.fromRGB(60, 20, 0))
-add("💥 THROTTLE RENDER",       "throttleRender", toggleThrottleRender, Color3.fromRGB(60, 20, 0))
-add("💥 MEMORY PURGE",          "memoryPurge",   toggleMemoryPurge,   Color3.fromRGB(60, 20, 0))
+-- 🔥 BẬT TẤT CẢ (TOP)
+local allBtn = Instance.new("TextButton")
+allBtn.Size = UDim2.new(1, -20, 0, 70); allBtn.Position = UDim2.new(0, 10, 0, y)
+allBtn.BackgroundColor3 = Color3.fromRGB(150, 0, 0)
+allBtn.Text = "🔥 BẬT TẤT CẢ\n(NHANH 5X - 1 PASS DUY NHẤT)"
+allBtn.Font = Enum.Font.GothamBold; allBtn.TextSize = 13
+allBtn.TextColor3 = Color3.fromRGB(255, 255, 255); allBtn.Parent = scroll
+Instance.new("UICorner", allBtn).CornerRadius = UDim.new(0, 10)
+local allStroke = Instance.new("UIStroke", allBtn)
+allStroke.Color = Color3.fromRGB(255, 50, 50); allStroke.Thickness = 4
+_G_allBtn = allBtn
+
+allBtn.MouseButton1Click:Connect(function()
+    if allLoading then return end
+    local newState = not (state.turboFix and state.ghostMap)
+    if newState then
+        fastBatchApply("all")
+        for k, data in pairs(buttons) do
+            state[k] = true
+            data.btn.BackgroundColor3 = Color3.fromRGB(255, 100, 0)
+            data.btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+            data.btn.Text = "● " .. data.label
+        end
+    else
+        fastOffAll()
+        for k, data in pairs(buttons) do
+            state[k] = false
+            data.btn.BackgroundColor3 = data.color or Color3.fromRGB(45, 45, 60)
+            data.btn.TextColor3 = Color3.fromRGB(200, 200, 200)
+            data.btn.Text = "○ " .. data.label
+        end
+    end
+end)
+
+y = y + 76
+
+-- TURBO BUTTON
+local turboBtn = Instance.new("TextButton")
+turboBtn.Size = UDim2.new(1, -20, 0, 60); turboBtn.Position = UDim2.new(0, 10, 0, y)
+turboBtn.BackgroundColor3 = Color3.fromRGB(180, 50, 0)
+turboBtn.Text = "🔥🔥🔥 TURBO LAG FIX (NHANH 5X)"
+turboBtn.Font = Enum.Font.GothamBold; turboBtn.TextSize = 12
+turboBtn.TextColor3 = Color3.fromRGB(255, 255, 255); turboBtn.Parent = scroll
+Instance.new("UICorner", turboBtn).CornerRadius = UDim.new(0, 10)
+local turboStroke = Instance.new("UIStroke", turboBtn)
+turboStroke.Color = Color3.fromRGB(255, 255, 0); turboStroke.Thickness = 3
+_G_turboBtn = turboBtn
+
+turboBtn.MouseButton1Click:Connect(function()
+    if turboLoading then return end
+    if not state.turboFix then
+        fastBatchApply("turbo")
+        state.autoClean = true
+        for k, data in pairs(buttons) do
+            if state[k] then
+                data.btn.BackgroundColor3 = Color3.fromRGB(255, 100, 0)
+                data.btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+                data.btn.Text = "● " .. data.label
+            end
+        end
+    else
+        fastOffAll()
+        state.autoClean = false
+        for _, data in pairs(buttons) do
+            data.btn.BackgroundColor3 = data.color or Color3.fromRGB(45, 45, 60)
+            data.btn.TextColor3 = Color3.fromRGB(200, 200, 200)
+            data.btn.Text = "○ " .. data.label
+        end
+    end
+end)
+
+y = y + 66
 
 header("👻 GHOST MAP 30%", Color3.fromRGB(200, 200, 255))
 add("👻 GHOST MAP 30%", "ghostMap", toggleGhostMap, Color3.fromRGB(40, 40, 60))
@@ -1471,27 +1385,40 @@ header("⚫ BLACK MODE", Color3.fromRGB(255, 50, 50))
 add("⚫ PLAYER BLACK", "playerBlack", togglePlayerBlack, Color3.fromRGB(30, 0, 0))
 add("⚫ NPC BLACK",    "npcBlack",    toggleNpcBlack,    Color3.fromRGB(30, 0, 0))
 
+header("🔥🔥🔥 TURBO (AN TOÀN UI)", Color3.fromRGB(255, 100, 0))
+add("💥 KILL INVISIBLE", "killInvisible", toggleKillInvisible, Color3.fromRGB(60, 20, 0))
+add("💥 KILL TINY",      "killTiny",      toggleKillTiny,      Color3.fromRGB(60, 20, 0))
+add("💥 FORCE PLASTIC",  "forcePlastic",  toggleForcePlastic,  Color3.fromRGB(60, 20, 0))
+add("💥 KILL DECAL/TEXTURE", "killDecalTexture", toggleKillDecalTexture, Color3.fromRGB(60, 20, 0))
+add("💥 STOP ALL ANIM",  "stopAllAnim",   toggleStopAllAnim,   Color3.fromRGB(60, 20, 0))
+add("💥 SLEEP HUMANOIDS","sleepHumanoids",toggleSleepHumanoids,Color3.fromRGB(60, 20, 0))
+add("💥 ANCHOR XA",      "anchorFar",     toggleAnchorFar,     Color3.fromRGB(60, 20, 0))
+add("💥 CAMERA OPT",     "cameraOptimize",toggleCameraOptimize,Color3.fromRGB(60, 20, 0))
+add("💥 PURGE LIGHTING", "purgeLighting", togglePurgeLighting, Color3.fromRGB(60, 20, 0))
+add("💥 THROTTLE",       "throttleRender",toggleThrottleRender,Color3.fromRGB(60, 20, 0))
+add("💥 MEMORY PURGE",   "memoryPurge",   toggleMemoryPurge,   Color3.fromRGB(60, 20, 0))
+
 header("⚙️ FIX LAG CƠ BẢN", Color3.fromRGB(100, 200, 255))
 add("Tắt đèn & hậu kỳ",     "lighting",       toggleLighting)
 add("Tắt hạt & effects",     "effects",        toggleEffects)
 add("🔥 DIỆT LỬA MỌI MÀU",   "killFire",       toggleAntiFire)
 add("🧹 DỌN RÁC EFFECT",     "debrisClean",    toggleDebrisClean)
-add("🖼 PURGE EFFECTS ONLY", "purgeEffectsOnly", togglePurgeEffectsOnly)
+add("🖼 PURGE EFFECTS",      "purgeEffectsOnly", togglePurgeEffectsOnly)
 add("🌪️ PURGE PARTICLE MODELS", "purgeParticleModels", togglePurgeParticleModels)
-add("☢️ KILL ALL BEAM/TRAIL", "killAllBeam",    toggleKillAllBeam)
-add("☢️ KILL ALL SOUND",      "killAllSound",   toggleKillAllSound)
+add("☢️ KILL ALL BEAM",      "killAllBeam",    toggleKillAllBeam)
+add("☢️ KILL ALL SOUND",     "killAllSound",   toggleKillAllSound)
 add("🔇 Sound Killer",         "soundKill",      toggleSoundKill)
-add("☢️ BLOCK SPAWN FX",       "blockSpawn",     toggleBlockSpawn)
-add("☢️ STOP ANIMATIONS",      "stopAnims",      toggleStopAnims)
+add("☢️ BLOCK SPAWN",        "blockSpawn",     toggleBlockSpawn)
+add("☢️ STOP ANIM",          "stopAnims",      toggleStopAnims)
 add("Ẩn vật thể xa",          "hideFar",        toggleHideFar)
-add("Chất lượng thấp nhất",   "lowQuality",     toggleLowQuality)
+add("Chất lượng thấp",        "lowQuality",     toggleLowQuality)
 add("Tắt Atmosphere",         "atmosphere",     toggleAtmosphere)
 add("Giảm Physics xa",        "physics",        togglePhysics)
 add("⚫ Xóa Skybox",          "skybox",         toggleSkybox)
 add("⚫ Xóa Terrain",         "terrain",        toggleTerrain)
-add("⚫ Kill mọi Light",      "killLights",     toggleKillLights)
+add("⚫ Kill Light",          "killLights",     toggleKillLights)
 add("⚫ KILL TERRAIN 2",      "killDecor2",     toggleKillDecor2)
-add("✦ Tắt Shadow toàn bộ",   "forceShadow",    toggleForceShadow)
+add("✦ Tắt Shadow",           "forceShadow",    toggleForceShadow)
 add("💀 FORCE MIN GRAPHICS",   "forceMinGraphics", toggleForceMinGraphics)
 add("💀 INSTANT GC",           "instantGC",      toggleInstantGC)
 add("💀 AGGRESSIVE GC",        "aggressiveGC",   toggleAggressiveGC)
@@ -1569,97 +1496,6 @@ end)
 
 y = y + 35
 
--- 🔥 BẬT TẤT CẢ (MỚI)
-local allBtn = Instance.new("TextButton")
-allBtn.Size = UDim2.new(1, -20, 0, 80); allBtn.Position = UDim2.new(0, 10, 0, y)
-allBtn.BackgroundColor3 = Color3.fromRGB(150, 0, 0)
-allBtn.Text = "🔥 BẬT TẤT CẢ\n(FIX LAG + GHOST + BLACK)"
-allBtn.Font = Enum.Font.GothamBold; allBtn.TextSize = 14
-allBtn.TextColor3 = Color3.fromRGB(255, 255, 255); allBtn.Parent = scroll
-Instance.new("UICorner", allBtn).CornerRadius = UDim.new(0, 10)
-local allStroke = Instance.new("UIStroke", allBtn)
-allStroke.Color = Color3.fromRGB(255, 50, 50); allStroke.Thickness = 4
-
-_G_allBtn = allBtn
-
-allBtn.MouseButton1Click:Connect(function()
-    if allLoading then return end
-    local newState = not (state.turboFix and state.ghostMap and state.playerBlack and state.npcBlack)
-
-    if newState then
-        state.turboFix = true
-        pcall(toggleAllOn, true)
-        autoBtn.BackgroundColor3 = Color3.fromRGB(30, 130, 70)
-        autoBtn.Text = "● AUTO CLEAN (0.3s)"
-        -- Update all buttons
-        for k, data in pairs(buttons) do
-            state[k] = true
-            data.btn.BackgroundColor3 = Color3.fromRGB(255, 100, 0)
-            data.btn.TextColor3 = Color3.fromRGB(255, 255, 255)
-            data.btn.Text = "● " .. data.label
-        end
-    else
-        state.turboFix = false
-        pcall(toggleAllOn, false)
-        autoBtn.BackgroundColor3 = Color3.fromRGB(45, 45, 60)
-        autoBtn.Text = "○ AUTO CLEAN (0.3s)"
-        for k, data in pairs(buttons) do
-            state[k] = false
-            data.btn.BackgroundColor3 = data.color or Color3.fromRGB(45, 45, 60)
-            data.btn.TextColor3 = Color3.fromRGB(200, 200, 200)
-            data.btn.Text = "○ " .. data.label
-        end
-    end
-end)
-
-y = y + 86
-
--- TURBO FIX BUTTON
-local turboBtn = Instance.new("TextButton")
-turboBtn.Size = UDim2.new(1, -20, 0, 70); turboBtn.Position = UDim2.new(0, 10, 0, y)
-turboBtn.BackgroundColor3 = Color3.fromRGB(180, 50, 0)
-turboBtn.Text = "🔥🔥🔥 TURBO LAG FIX\n(CHỐNG LAG KHI BẬT 4 MENU)"
-turboBtn.Font = Enum.Font.GothamBold; turboBtn.TextSize = 13
-turboBtn.TextColor3 = Color3.fromRGB(255, 255, 255); turboBtn.Parent = scroll
-Instance.new("UICorner", turboBtn).CornerRadius = UDim.new(0, 10)
-local turboStroke = Instance.new("UIStroke", turboBtn)
-turboStroke.Color = Color3.fromRGB(255, 255, 0); turboStroke.Thickness = 3
-
-_G_turboBtn = turboBtn
-
-turboBtn.MouseButton1Click:Connect(function()
-    if turboLoading then return end
-    state.turboFix = not state.turboFix
-    if state.turboFix then
-        pcall(toggleTurboFix, true)
-        state.autoClean = true
-        autoBtn.BackgroundColor3 = Color3.fromRGB(30, 130, 70)
-        autoBtn.Text = "● AUTO CLEAN (0.3s)"
-        for k, data in pairs(buttons) do
-            if state[k] then
-                data.btn.BackgroundColor3 = Color3.fromRGB(255, 100, 0)
-                data.btn.TextColor3 = Color3.fromRGB(255, 255, 255)
-                data.btn.Text = "● " .. data.label
-            end
-        end
-    else
-        pcall(toggleTurboFix, false)
-        state.autoClean = false
-        autoBtn.BackgroundColor3 = Color3.fromRGB(45, 45, 60)
-        autoBtn.Text = "○ AUTO CLEAN (0.3s)"
-        turboBtn.Text = "🔥🔥🔥 TURBO LAG FIX\n(CHỐNG LAG KHI BẬT 4 MENU)"
-        turboBtn.BackgroundColor3 = Color3.fromRGB(180, 50, 0)
-        for _, data in pairs(buttons) do
-            data.btn.BackgroundColor3 = data.color or Color3.fromRGB(45, 45, 60)
-            data.btn.TextColor3 = Color3.fromRGB(200, 200, 200)
-            data.btn.Text = "○ " .. data.label
-        end
-    end
-end)
-
-y = y + 76
-
--- GHOST + BLACK BUTTON
 local comboBtn = Instance.new("TextButton")
 comboBtn.Size = UDim2.new(1, -20, 0, 50); comboBtn.Position = UDim2.new(0, 10, 0, y)
 comboBtn.BackgroundColor3 = Color3.fromRGB(30, 30, 50)
@@ -1672,9 +1508,7 @@ comboStroke.Color = Color3.fromRGB(200, 200, 255); comboStroke.Thickness = 2
 
 comboBtn.MouseButton1Click:Connect(function()
     local newState = not (state.ghostMap and state.playerBlack and state.npcBlack)
-    state.ghostMap = newState
-    state.playerBlack = newState
-    state.npcBlack = newState
+    state.ghostMap = newState; state.playerBlack = newState; state.npcBlack = newState
     pcall(toggleGhostMap, newState)
     pcall(togglePlayerBlack, newState)
     pcall(toggleNpcBlack, newState)
@@ -1697,7 +1531,6 @@ end)
 
 y = y + 56
 
--- TẮT TẤT CẢ
 local offAllBtn = Instance.new("TextButton")
 offAllBtn.Size = UDim2.new(1, -20, 0, 36); offAllBtn.Position = UDim2.new(0, 10, 0, y)
 offAllBtn.BackgroundColor3 = Color3.fromRGB(120, 90, 20)
@@ -1706,30 +1539,13 @@ offAllBtn.Font = Enum.Font.GothamBold; offAllBtn.TextSize = 12
 offAllBtn.TextColor3 = Color3.fromRGB(255, 255, 255); offAllBtn.Parent = scroll
 Instance.new("UICorner", offAllBtn).CornerRadius = UDim.new(0, 10)
 offAllBtn.MouseButton1Click:Connect(function()
-    state.autoClean = false
-    state.ghostMap = false
-    state.playerBlack = false
-    state.npcBlack = false
-    state.turboFix = false
-
-    spawn(function()
-        pcall(toggleGhostMap, false)
-        pcall(togglePlayerBlack, false)
-        pcall(toggleNpcBlack, false)
-        task.wait(0.1)
-        offAll()
-        forceEnableCoreGui()
-    end)
-
+    fastOffAll()
     autoBtn.BackgroundColor3 = Color3.fromRGB(45, 45, 60)
     autoBtn.Text = "○ AUTO CLEAN (0.3s)"
-    turboBtn.Text = "🔥🔥🔥 TURBO LAG FIX\n(CHỐNG LAG KHI BẬT 4 MENU)"
-    turboBtn.BackgroundColor3 = Color3.fromRGB(180, 50, 0)
     comboBtn.Text = "👻⚫ GHOST + BLACK"
     comboBtn.BackgroundColor3 = Color3.fromRGB(30, 30, 50)
-    allBtn.Text = "🔥 BẬT TẤT CẢ\n(FIX LAG + GHOST + BLACK)"
-    allBtn.BackgroundColor3 = Color3.fromRGB(150, 0, 0)
     for _, data in pairs(buttons) do
+        state[data.label] = false
         data.btn.BackgroundColor3 = data.color or Color3.fromRGB(45, 45, 60)
         data.btn.TextColor3 = Color3.fromRGB(200, 200, 200)
         data.btn.Text = "○ " .. data.label
@@ -1771,7 +1587,7 @@ RunService.RenderStepped:Connect(function()
 end)
 
 -- =====================================================
--- LOOPS (Optimized)
+-- LOOPS
 -- =====================================================
 spawn(function()
     while task.wait(0.3) do
@@ -1798,7 +1614,7 @@ spawn(function()
 end)
 
 spawn(function()
-    while task.wait(3) do  -- 3s thay vì 1s
+    while task.wait(3) do
         if state.ghostMap then
             local level = state.ghostLevel
             local count = 0
@@ -1823,13 +1639,6 @@ spawn(function()
 end)
 
 spawn(function()
-    while task.wait(0.5) do
-        if state.killFire then pcall(toggleAntiFire, true) end
-        if state.killAllBeam then pcall(toggleKillAllBeam, true) end
-    end
-end)
-
-spawn(function()
     while task.wait(2) do
         pcall(function() collectgarbage("collect") end)
     end
@@ -1848,4 +1657,4 @@ LocalPlayer.CharacterAdded:Connect(function(char)
     if state.npcBlack then pcall(toggleNpcBlack, true) end
 end)
 
-print("🔥 FIXLAG_VN TURBO v3 loaded! Async + Cache + BẬT TẤT CẢ. UI an toàn 100%.")
+print("⚡ FIXLAG_VN TURBO v4 loaded! Single-pass batch, tốc độ 5x.")

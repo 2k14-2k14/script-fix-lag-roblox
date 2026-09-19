@@ -1,6 +1,6 @@
 -- =====================================================
--- FIXLAG_VN GHOST v2 — Trong suốt 30% + Bảo vệ CoreGui
--- Đã loại bỏ mọi tính năng ảnh hưởng Chat/Backpack/Tab
+-- FIXLAG_VN GHOST v3 — Fix vật đen vuông + mặt trời
+-- Chỉ ghost TƯỜNG thật, bỏ qua Sky/Sun/Cloud/Lens
 -- =====================================================
 local Lighting    = game:GetService("Lighting")
 local Workspace   = game:GetService("Workspace")
@@ -17,7 +17,7 @@ for _, v in ipairs(game.CoreGui:GetChildren()) do
 end
 
 -- =====================================================
--- 🛡️ FORCE ENABLE CoreGui (Chat, Backpack, PlayerList)
+-- 🛡️ FORCE ENABLE CoreGui
 -- =====================================================
 local function forceEnableCoreGui()
     pcall(function()
@@ -30,20 +30,78 @@ local function forceEnableCoreGui()
 end
 forceEnableCoreGui()
 
--- Watchdog: đảm bảo CoreGui luôn bật
 spawn(function()
-    while task.wait(1) do
-        forceEnableCoreGui()
-    end
+    while task.wait(1) do forceEnableCoreGui() end
 end)
 
--- 🛡️ WHITELIST — Part KHÔNG được làm trong suốt
+-- =====================================================
+-- 🚫 BLACKLIST — TUYỆT ĐỐI KHÔNG ĐỤNG VÀO
+-- =====================================================
+local BLACKLIST_KEYWORDS = {
+    -- Bầu trời & thiên nhiên
+    "sky", "sun", "moon", "star", "cloud", "lens", "flare",
+    "atmosphere", "fog", "rain", "snow", "wind",
+    -- Hiệu ứng
+    "particle", "effect", "glow", "beam", "trail", "smoke",
+    "fire", "flame", "spark", "light", "lamp",
+    -- UI/Text
+    "billboard", "surfacegui", "text", "gui", "label", "sign",
+    "nametag", "name",
+    -- Character & NPC
+    "humanoid", "character", "player", "npc",
+    -- Vật che
+    "decal", "texture", "image", "sprite", "icon", "logo",
+    -- Đặc biệt
+    "lensfl", "spawnlocation", "checkpoint",
+}
+
 local PROTECTED_NAMES = {
     "baseplate","base","ground","floor","platform","spawn",
     "terrain","world","map","zone","area","region",
     "start","lobby","hub","main","center","root",
     "foundation","pavement","road","path","walkway",
 }
+
+-- Material an toàn (có thể ghost)
+local GHOST_MATERIALS = {
+    [Enum.Material.Brick] = true,
+    [Enum.Material.Concrete] = true,
+    [Enum.Material.CorrodedMetal] = true,
+    [Enum.Material.DiamondPlate] = true,
+    [Enum.Material.Fabric] = true,
+    [Enum.Material.Granite] = true,
+    [Enum.Material.Marble] = true,
+    [Enum.Material.Metal] = true,
+    [Enum.Material.Pebble] = true,
+    [Enum.Material.Plastic] = true,
+    [Enum.Material.Sand] = true,
+    [Enum.Material.Sandstone] = true,
+    [Enum.Material.Slate] = true,
+    [Enum.Material.SmoothPlastic] = true,
+    [Enum.Material.Wood] = true,
+    [Enum.Material.WoodPlanks] = true,
+    [Enum.Material.Cobblestone] = true,
+}
+
+-- Material KHÔNG ghost (dễ gây lỗi vuông đen)
+local NO_GHOST_MATERIALS = {
+    [Enum.Material.Neon] = true,
+    [Enum.Material.ForceField] = true,
+    [Enum.Material.Glass] = true,
+    [Enum.Material.Foil] = true,
+    [Enum.Material.Marble] = true,
+    [Enum.Material.Ice] = true,
+    [Enum.Material.Glacier] = true,
+}
+
+local function isBlacklisted(p)
+    if not p or not p.Name then return false end
+    local n = p.Name:lower()
+    for _, k in ipairs(BLACKLIST_KEYWORDS) do
+        if n:find(k) then return true end
+    end
+    return false
+end
 
 local function isProtected(p)
     if not p or not p.Name then return false end
@@ -60,22 +118,71 @@ local function isProtected(p)
     return false
 end
 
+local function isPartOfAnyCharacter(p)
+    if not p then return false end
+    for _, plr in ipairs(Players:GetPlayers()) do
+        if plr.Character and p:IsDescendantOf(plr.Character) then return true end
+    end
+    local anc = p
+    for i = 1, 5 do
+        if not anc or anc == Workspace then break end
+        anc = anc.Parent
+        if anc and anc:IsA("Model") and anc:FindFirstChildOfClass("Humanoid") then return true end
+    end
+    return false
+end
+
+-- 🎯 HÀM QUAN TRỌNG: Chỉ ghost part "sạch"
+local function isSafeToGhost(p)
+    if not p or not p:IsA("BasePart") then return false end
+    -- Có tên blacklist → bỏ
+    if isBlacklisted(p) then return false end
+    -- Part bảo vệ → bỏ
+    if isProtected(p) then return false end
+    -- Thuộc character → bỏ
+    if isPartOfAnyCharacter(p) then return false end
+    -- Có con là Particle/Beam/Trail/SurfaceGui/BillboardGui → bỏ
+    if p:FindFirstChildOfClass("ParticleEmitter") then return false end
+    if p:FindFirstChildOfClass("Beam") then return false end
+    if p:FindFirstChildOfClass("Trail") then return false end
+    if p:FindFirstChildOfClass("SurfaceGui") then return false end
+    if p:FindFirstChildOfClass("BillboardGui") then return false end
+    if p:FindFirstChildOfClass("PointLight") then return false end
+    if p:FindFirstChildOfClass("SpotLight") then return false end
+    if p:FindFirstChildOfClass("SurfaceLight") then return false end
+    -- Material cấm → bỏ
+    if NO_GHOST_MATERIALS[p.Material] then return false end
+    -- Neon/Glass/Foil → bỏ (dễ gây vuông đen)
+    if p.Material == Enum.Material.Neon then return false end
+    if p.Material == Enum.Material.Glass then return false end
+    if p.Material == Enum.Material.ForceField then return false end
+    -- Part trong suốt sẵn → bỏ
+    if p.Transparency >= 0.95 then return false end
+    -- Part rất nhỏ → bỏ
+    local s = p.Size
+    if s.X < 1 and s.Y < 1 and s.Z < 1 then return false end
+    -- Part rất mỏng + to → bỏ (thường là billboard/sign)
+    if s.Y < 0.1 and (s.X > 10 or s.Z > 10) then return false end
+    -- Part có Shape Cylinder/Ball → bỏ (thường là effect)
+    if p:IsA("Part") then
+        if p.Shape == Enum.PartType.Ball then return false end
+        if p.Shape == Enum.PartType.Cylinder then return false end
+    end
+    return true
+end
+
 local state = {
-    -- GHOST MAP
-    ghostMap=false, ghostLevel=0.3,  -- ĐÃ ĐỔI: 30%
-    -- BLACK MODE
+    ghostMap=false, ghostLevel=0.3,
     playerBlack=false, npcBlack=false,
-    -- FIX LAG
     lighting=false, effects=false, hideFar=false,
     lowQuality=false, atmosphere=false, physics=false,
     skybox=false, terrain=false, killLights=false,
     killFire=false, debrisClean=false, soundKill=false,
-    killAllSound=false, killAllBeam=false,  -- ĐÃ BỎ killAllGui
+    killAllSound=false, killAllBeam=false,
     blockSpawn=false, stopAnims=false, killDecor2=false,
     aggressiveGC=false, instantGC=false,
     forceMinGraphics=false, forceShadow=false,
     purgeEffectsOnly=false, purgeParticleModels=false,
-    -- Meta
     autoClean=false, cullDist=80, fpsTarget=60,
 }
 
@@ -122,20 +229,6 @@ local function getOrigin()
     return nil, nil
 end
 
-local function isPartOfAnyCharacter(p)
-    if not p then return false end
-    for _, plr in ipairs(Players:GetPlayers()) do
-        if plr.Character and p:IsDescendantOf(plr.Character) then return true end
-    end
-    local anc = p
-    for i = 1, 5 do
-        if not anc or anc == Workspace then break end
-        anc = anc.Parent
-        if anc and anc:IsA("Model") and anc:FindFirstChildOfClass("Humanoid") then return true end
-    end
-    return false
-end
-
 local function isFireColor(c)
     if not c then return false end
     local r, g, b = c.R, c.G, c.B
@@ -151,7 +244,7 @@ local function isFireTexture(t)
 end
 
 -- =====================================================
--- 👻 GHOST MAP — Làm trong suốt map 30%
+-- 👻 GHOST MAP v3 — AN TOÀN
 -- =====================================================
 local function toggleGhostMap(on)
     if on then
@@ -160,9 +253,7 @@ local function toggleGhostMap(on)
         for _, v in ipairs(Workspace:GetDescendants()) do
             pcall(function()
                 if v:IsA("BasePart") then
-                    if isPartOfAnyCharacter(v) then return end
-                    if isProtected(v) then return end
-                    if v.Transparency >= 0.98 then return end
+                    if not isSafeToGhost(v) then return end
 
                     if not v:GetAttribute("GhostOrig") then
                         v:SetAttribute("GhostOrig", v.Transparency)
@@ -177,18 +268,6 @@ local function toggleGhostMap(on)
                         v.CastShadow = false
                     end
                 end
-
-                if (v:IsA("Decal") or v:IsA("Texture")) then
-                    local par = v.Parent
-                    if par and par:IsA("BasePart") and not isProtected(par)
-                       and not isPartOfAnyCharacter(par) then
-                        if not v:GetAttribute("GhostOrigT") then
-                            v:SetAttribute("GhostOrigT", v.Transparency)
-                            table.insert(saved.ghostParts, {obj=v, t=v.Transparency})
-                        end
-                        v.Transparency = math.max(v.Transparency, level)
-                    end
-                end
             end)
         end
 
@@ -197,7 +276,7 @@ local function toggleGhostMap(on)
             if not state.ghostMap then return end
             task.wait(0.3)
             pcall(function()
-                if v:IsA("BasePart") and not isProtected(v) and not isPartOfAnyCharacter(v) then
+                if v:IsA("BasePart") and isSafeToGhost(v) then
                     if not v:GetAttribute("GhostOrig") then
                         v:SetAttribute("GhostOrig", v.Transparency)
                         table.insert(saved.ghostParts, {obj=v, t=v.Transparency})
@@ -231,13 +310,19 @@ local function toggleGhostMap(on)
 end
 
 -- =====================================================
--- ⚫ BLACK MODE
+-- ⚫ BLACK MODE v3 — Chỉ áp dụng cho character parts chính
 -- =====================================================
 local function makeBlack(char, saveList)
     if not char then return end
     for _, v in ipairs(char:GetDescendants()) do
         pcall(function()
             if v:IsA("BasePart") then
+                -- Skip part neon/glass (dễ gây vuông đen)
+                if v.Material == Enum.Material.Neon then return end
+                if v.Material == Enum.Material.Glass then return end
+                -- Skip part đã trong suốt
+                if v.Transparency > 0.5 then return end
+
                 if not v:GetAttribute("BlackOrig") then
                     v:SetAttribute("BlackOrig", v.Color)
                     table.insert(saveList, {obj=v, c=v.Color, m=v.Material, t=v.Transparency})
@@ -356,7 +441,7 @@ local function toggleHideFar(on)
         for _, v in ipairs(Workspace:GetDescendants()) do
             pcall(function()
                 if v:IsA("BasePart") and not v:IsDescendantOf(char) and not isProtected(v) then
-                    if not isPartOfAnyCharacter(v) then
+                    if not isPartOfAnyCharacter(v) and not isBlacklisted(v) then
                         if (v.Position - origin).Magnitude > state.cullDist and v.Transparency < 0.95 then
                             table.insert(saved.parts, {obj=v, trans=v.Transparency}); v.Transparency = 1
                         end
@@ -637,7 +722,7 @@ local function toggleForceShadow(on)
     if on then
         for _, v in ipairs(Workspace:GetDescendants()) do
             pcall(function()
-                if v:IsA("BasePart") and v.CastShadow then
+                if v:IsA("BasePart") and v.CastShadow and not isBlacklisted(v) then
                     table.insert(saved.materials, {obj=v, c=v.CastShadow})
                     v.CastShadow = false
                 end
@@ -689,7 +774,7 @@ local function togglePurgeParticleModels(on)
 end
 
 -- =====================================================
--- APPLY / OFF (KHÔNG có killAllGui, killAllSound vẫn OK vì chỉ tắt âm thanh)
+-- APPLY / OFF
 -- =====================================================
 local safeKeys = {
     "lighting","effects","hideFar","lowQuality","atmosphere","physics",
@@ -774,7 +859,7 @@ mStroke.Color = Color3.fromRGB(180, 180, 180); mStroke.Thickness = 2
 
 local title = Instance.new("TextLabel")
 title.Size = UDim2.new(1, -40, 0, 34); title.Position = UDim2.new(0, 10, 0, 3)
-title.BackgroundTransparency = 1; title.Text = "👻 FIXLAG_VN GHOST v2"
+title.BackgroundTransparency = 1; title.Text = "👻 FIXLAG_VN GHOST v3"
 title.Font = Enum.Font.GothamBold; title.TextSize = 14
 title.TextColor3 = Color3.fromRGB(200, 200, 200)
 title.TextXAlignment = Enum.TextXAlignment.Left; title.Parent = menu
@@ -836,7 +921,6 @@ end
 header("👻 GHOST MAP (TRONG SUỐT 30%)", Color3.fromRGB(200, 200, 255))
 add("👻 GHOST MAP 30%", "ghostMap", toggleGhostMap, Color3.fromRGB(40, 40, 60))
 
--- Ghost level slider (30% mặc định)
 local gLbl = Instance.new("TextLabel")
 gLbl.Size = UDim2.new(1, -20, 0, 20); gLbl.Position = UDim2.new(0, 10, 0, y)
 gLbl.BackgroundTransparency = 1; gLbl.Text = "Mức trong suốt: 30%"
@@ -898,7 +982,6 @@ add("💀 FORCE MIN GRAPHICS",   "forceMinGraphics", toggleForceMinGraphics)
 add("💀 INSTANT GC",           "instantGC",      toggleInstantGC)
 add("💀 AGGRESSIVE GC",        "aggressiveGC",   toggleAggressiveGC)
 
--- FPS Lock
 local fpsLabel = Instance.new("TextLabel")
 fpsLabel.Size = UDim2.new(1, -20, 0, 20); fpsLabel.Position = UDim2.new(0, 10, 0, y + 5)
 fpsLabel.BackgroundTransparency = 1; fpsLabel.Text = "🔒 KHÓA FPS"
@@ -971,7 +1054,6 @@ end)
 
 y = y + 35
 
--- GHOST + BLACK BUTTON
 local comboBtn = Instance.new("TextButton")
 comboBtn.Size = UDim2.new(1, -20, 0, 70); comboBtn.Position = UDim2.new(0, 10, 0, y)
 comboBtn.BackgroundColor3 = Color3.fromRGB(30, 30, 50)
@@ -987,11 +1069,9 @@ comboBtn.MouseButton1Click:Connect(function()
     state.ghostMap = newState
     state.playerBlack = newState
     state.npcBlack = newState
-
     pcall(toggleGhostMap, newState)
     pcall(togglePlayerBlack, newState)
     pcall(toggleNpcBlack, newState)
-
     if newState then
         comboBtn.Text = "👻⚫ GHOST + BLACK\n(ĐANG ÁP DỤNG...)"
         comboBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 100)
@@ -999,7 +1079,6 @@ comboBtn.MouseButton1Click:Connect(function()
         comboBtn.Text = "👻⚫ GHOST + BLACK\n(MAP MỜ 30% + PLAYER ĐEN)"
         comboBtn.BackgroundColor3 = Color3.fromRGB(30, 30, 50)
     end
-
     for _, k in ipairs({"ghostMap","playerBlack","npcBlack"}) do
         local d = buttons[k]
         if d then
@@ -1012,7 +1091,6 @@ end)
 
 y = y + 76
 
--- BẬT TẤT CẢ
 local allBtn = Instance.new("TextButton")
 allBtn.Size = UDim2.new(1, -20, 0, 42); allBtn.Position = UDim2.new(0, 10, 0, y)
 allBtn.BackgroundColor3 = Color3.fromRGB(120, 0, 0)
@@ -1044,7 +1122,6 @@ end)
 
 y = y + 47
 
--- TẮT TẤT CẢ
 local offAllBtn = Instance.new("TextButton")
 offAllBtn.Size = UDim2.new(1, -20, 0, 36); offAllBtn.Position = UDim2.new(0, 10, 0, y)
 offAllBtn.BackgroundColor3 = Color3.fromRGB(120, 90, 20)
@@ -1061,7 +1138,7 @@ offAllBtn.MouseButton1Click:Connect(function()
     pcall(toggleGhostMap, false)
     pcall(togglePlayerBlack, false)
     pcall(toggleNpcBlack, false)
-    forceEnableCoreGui()  -- Khôi phục Chat/Backpack/Tab
+    forceEnableCoreGui()
     autoBtn.BackgroundColor3 = Color3.fromRGB(45, 45, 60)
     autoBtn.Text = "○ AUTO CLEAN (0.3s)"
     comboBtn.Text = "👻⚫ GHOST + BLACK\n(MAP MỜ 30% + PLAYER ĐEN)"
@@ -1076,7 +1153,6 @@ end)
 y = y + 42
 scroll.CanvasSize = UDim2.new(0, 0, 0, y + 15)
 
--- Slider logic
 local draggingDist = false
 sliderBtn.MouseButton1Down:Connect(function() draggingDist = true end)
 sliderBtn.MouseButton1Up:Connect(function() draggingDist = false end)
@@ -1090,7 +1166,6 @@ end)
 
 RunService.RenderStepped:Connect(function()
     local mouse = LocalPlayer:GetMouse()
-
     if dragGhost then
         local relX = math.clamp((mouse.X - gBg.AbsolutePosition.X) / gBg.AbsoluteSize.X, 0.05, 0.95)
         gFill.Size = UDim2.new(relX, 0, 1, 0)
@@ -1099,7 +1174,6 @@ RunService.RenderStepped:Connect(function()
         state.ghostLevel = level
         gLbl.Text = "Mức trong suốt: " .. math.floor(level * 100) .. "%"
     end
-
     if draggingDist then
         local relX = math.clamp((mouse.X - sliderBg.AbsolutePosition.X) / sliderBg.AbsoluteSize.X, 0, 1)
         sliderFill.Size = UDim2.new(relX, 0, 1, 0)
@@ -1109,10 +1183,7 @@ RunService.RenderStepped:Connect(function()
     end
 end)
 
--- =====================================================
 -- LOOPS
--- =====================================================
-
 spawn(function()
     while task.wait(0.3) do
         if state.autoClean then
@@ -1145,7 +1216,7 @@ spawn(function()
             for _, v in ipairs(Workspace:GetDescendants()) do
                 if count > 500 then break end
                 pcall(function()
-                    if v:IsA("BasePart") and not isProtected(v) and not isPartOfAnyCharacter(v) then
+                    if v:IsA("BasePart") and isSafeToGhost(v) then
                         if v.Transparency < level and v.Transparency < 0.98 then
                             if not v:GetAttribute("GhostOrig") then
                                 v:SetAttribute("GhostOrig", v.Transparency)
@@ -1176,7 +1247,7 @@ end)
 
 LocalPlayer.CharacterAdded:Connect(function(char)
     task.wait(2)
-    forceEnableCoreGui()  -- Đảm bảo chat/backpack/tab luôn bật
+    forceEnableCoreGui()
     for _, k in ipairs(safeKeys) do
         if state[k] then
             local fn = fnMap[k]; if fn then pcall(fn, true) end
@@ -1187,4 +1258,4 @@ LocalPlayer.CharacterAdded:Connect(function(char)
     if state.npcBlack then pcall(toggleNpcBlack, true) end
 end)
 
-print("👻 FIXLAG_VN GHOST v2 loaded! Map mờ 30%, player/NPC đen, chat+backpack+tab an toàn.")
+print("👻 FIXLAG_VN GHOST v3 loaded! Chỉ ghost tường thật, bỏ qua Sky/Sun/Effect.")
